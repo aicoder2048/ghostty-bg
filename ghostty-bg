@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-VERSION="1.6.0"
+VERSION="1.7.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -137,12 +137,22 @@ effective_opacity() {
   echo "${v:-1}"
 }
 
-# Rewrite background.ghostty. $1: image path ("" = no image), $2: opacity ("" = not set).
+# The image that was showing before `bgh` / `bgs off` hid it (kept as a comment,
+# so Ghostty ignores it); empty if the background is not hidden.
+hidden_image() {
+  [[ -f "$BG_CONF" ]] || return 0
+  sed -n 's/^# hidden-image = "\(.*\)"$/\1/p' "$BG_CONF"
+}
+
+# Rewrite background.ghostty.
+# $1: image path ("" = no image), $2: opacity ("" = not set),
+# $3: image to remember while hidden ("" = none).
 write_include() {
   {
     echo '# Managed by ghostty-bg — do not edit by hand. Run `bgs help` for commands.'
     [[ -n "$1" ]] && printf 'background-image = "%s"\n' "$1"
     [[ -n "$2" ]] && printf 'background-image-opacity = %s\n' "$2"
+    [[ -n "${3:-}" ]] && printf '# hidden-image = "%s"\n' "$3"
     true
   } > "$BG_CONF"
 }
@@ -344,9 +354,34 @@ cmd_list() {
 
 cmd_off() {
   require_init
-  write_include "" "$(managed_opacity)"
+  local cur
+  cur="$(current_image)"
+  [[ -n "$cur" ]] || cur="$(hidden_image)"   # already off: keep remembering the same image
+  write_include "" "$(managed_opacity)" "$cur"
   reload_ghostty
-  msg "Background image is off." "背景图已关闭。"
+  msg "Background image is hidden. (bgh or bgs on brings it back)" \
+      "背景图已隐藏。（再按 bgh 或 bgs on 恢复）"
+}
+
+# Show the image that was hidden; if it is gone, the first image in the library.
+cmd_on() {
+  require_init
+  local img
+  img="$(current_image)"
+  if [[ -n "$img" && -f "$img" ]]; then
+    msg "The background is already showing: $(basename "$img")" "背景图本来就在显示：$(basename "$img")"
+    return
+  fi
+  img="$(hidden_image)"
+  [[ -n "$img" && -f "$img" ]] || img="$(list_images | head -1)"
+  [[ -n "$img" ]] || empty_library
+  set_image "$img"
+}
+
+# bgh: hide the background image, or bring it back if it is hidden.
+cmd_toggle() {
+  require_init
+  if [[ -n "$(current_image)" ]]; then cmd_off; else cmd_on; fi
 }
 
 OPACITY_STEP="0.05"
@@ -373,7 +408,7 @@ cmd_opacity() {
   esac
   # Tidy the number: 0.30 -> 0.3, 1.00 -> 1, 0.00 -> 0.
   new="$(awk -v v="$new" 'BEGIN { printf "%g", v }')"
-  write_include "$(current_image)" "$new"
+  write_include "$(current_image)" "$new" "$(hidden_image)"
   reload_ghostty
   msg "Background image opacity: $cur -> $new" "背景图浓度：$cur -> $new"
 }
@@ -482,6 +517,47 @@ cmd_rm() {
   if (( failed > 0 )); then exit 1; fi
 }
 
+# bgm: one-screen menu of the short commands, with the current state on top.
+cmd_menu() {
+  local cur hid count state
+  count=0
+  if is_initialized; then
+    cur="$(current_image)"; hid="$(hidden_image)"
+    count="$(list_images | grep -c . || true)"
+    if [[ -n "$cur" ]]; then
+      state="$(msg "showing $(basename "$cur")" "正在显示 $(basename "$cur")")"
+    elif [[ -n "$hid" ]]; then
+      state="$(msg "hidden ($(basename "$hid"))" "已隐藏（$(basename "$hid")）")"
+    else
+      state="$(msg "no image" "没有背景图")"
+    fi
+    msg "ghostty-bg · $state · opacity $(effective_opacity) · $count in library" \
+        "ghostty-bg · $state · 浓度 $(effective_opacity) · 图库 $count 张"
+  else
+    msg "ghostty-bg · not set up yet — run: bgs init" "ghostty-bg · 还没设置——请先运行：bgs init"
+  fi
+  echo
+  if [[ "$UI_LANG" == zh ]]; then
+    cat <<'EOF'
+  换图   bgn  下一张      bgp  上一张      bgr  随机一张
+         bgs  挑一张（fzf 预览）
+  外观   bg+  浓一点      bg-  淡一点      bgh  隐藏 / 显示
+  图库   bgs add <图或文件夹>   加图        bgd  删掉当前这张
+         bgs rm <名字>          删图        bgs list  列出
+  其他   bgw  文件在哪    bgm  这个菜单    bgs help  完整帮助
+EOF
+  else
+    cat <<'EOF'
+  switch   bgn  next        bgp  previous    bgr  random
+           bgs  pick one (fzf preview)
+  look     bg+  stronger    bg-  fainter     bgh  hide / show
+  library  bgs add <image or folder>  add   bgd  delete current
+           bgs rm <name>              remove      bgs list  list
+  more     bgw  where       bgm  this menu   bgs help  full help
+EOF
+  fi
+}
+
 cmd_where() {
   local state
   if is_initialized; then
@@ -506,12 +582,12 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgs next | prev   下一张 / 上一张
   bgs random        随机一张
   bgs list          列出图库，* 是当前这张
-  bgs off           关掉背景图
+  bgs off | on      隐藏 / 恢复背景图（bgh 在两者之间切换）
   bgs rm <名字>     把图库里的图移到废纸篓（不写名字就用 fzf 多选；原图不受影响）
   bgs opacity       查看背景图浓度；bgs opacity 0.3 设成 0.3；+ / - 每次加减 0.05
   bgs where         显示用到的配置文件和图库位置（= bgw）
 
-快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgw = 文件在哪，bgd = 删掉当前这张
+快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgh = 隐藏/显示，bgw = 文件在哪，bgd = 删掉当前这张，bgm = 命令菜单
 
 语言：GHOSTTY_BG_LANG=zh 或 en（默认跟随 LANG）
 EOF
@@ -526,12 +602,12 @@ Usage (bgs and ghostty-bg are the same command):
   bgs next | prev   switch to the next / previous image
   bgs random        switch to a random image
   bgs list          list the library, * marks the current image
-  bgs off           turn the background image off
+  bgs off | on      hide / bring back the background image (bgh toggles)
   bgs rm <name>     move library images to the Trash (no name: pick with fzf; originals untouched)
   bgs opacity       show the image opacity; bgs opacity 0.3 sets it; + / - step by 0.05
   bgs where         show which files ghostty-bg uses (= bgw)
 
-Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgw = where, bgd = delete the current image
+Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgh = hide/show, bgw = where, bgd = delete the current image, bgm = command menu
 
 Language: GHOSTTY_BG_LANG=zh or en (default: follows LANG)
 EOF
@@ -556,7 +632,10 @@ main() {
     add)               shift; cmd_add "$@" ;;
     next|prev|random)  cmd_step "$1" ;;
     list|ls)           cmd_list ;;
-    off)               cmd_off ;;
+    off|hide)          cmd_off ;;
+    on|show)           cmd_on ;;
+    toggle)            cmd_toggle ;;
+    menu)              cmd_menu ;;
     rm|remove|delete)  shift; cmd_rm "$@" ;;
     opacity)           shift; cmd_opacity "${1:-}" ;;
     where)             cmd_where ;;

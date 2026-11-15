@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# bgh — shortcut for `ghostty-bg toggle`: hide the background image, or bring it back.
+exec ghostty-bg toggle "$@"

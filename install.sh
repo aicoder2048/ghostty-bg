@@ -26,8 +26,8 @@ fi
 REPO_RAW="${GHOSTTY_BG_REPO_RAW:-https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main}"
 SAMPLES=(sunset-sea.jpg atoll-aerial.jpg savanna.jpg)
 BIN_DIR="${GHOSTTY_BG_BIN:-$HOME/.local/bin}"
-# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd are one-line shortcuts.
-FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw bgd)
+# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd / bgh / bgm are one-line shortcuts.
+FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw bgd bgh bgm)
 
 mkdir -p "$BIN_DIR"
 
@@ -85,6 +85,6 @@ if [[ -z "$("$BIN_DIR/ghostty-bg" list)" ]]; then
   done
   "$BIN_DIR/ghostty-bg" next >/dev/null   # start from the first sample
   echo ""
-  msg "Done! Try: bgn (next)  bgp (previous)  bgr (random)  bg+ / bg- (stronger / fainter)" \
-      "装好了！试试：bgn（下一张）bgp（上一张）bgr（随机）bg+ / bg-（浓一点 / 淡一点）"
+  msg "Done! Try bgn (next image); bgm lists every command" \
+      "装好了！试试 bgn（下一张），bgm 查看所有命令"
 fi

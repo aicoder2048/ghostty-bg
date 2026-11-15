@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# bgm — shortcut for `ghostty-bg menu`: show the menu of short commands.
+exec ghostty-bg menu "$@"
