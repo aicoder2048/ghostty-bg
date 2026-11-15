@@ -26,9 +26,10 @@ fi
 
 REPO_RAW="${GHOSTTY_BG_REPO_RAW:-https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main}"
 SAMPLES=(sunset-sea.jpg atoll-aerial.jpg savanna.jpg)
-# Animated effects (GLSL shaders) for `bgf`; ghostty-bg looks for them here.
-FX=(snow.glsl leaves.glsl ripples.glsl bubbles.glsl petals.glsl aurora.glsl meteors.glsl fireflies.glsl birds.glsl fish.glsl butterflies.glsl jellyfish.glsl)
+# Animated effects (GLSL shaders) for `bgf`. fx/manifest.txt lists them, so the
+# installer does not need editing when effects are added.
 # Renamed or replaced in earlier versions; removed on upgrade so nothing stale is left.
+# (Only these exact names: your own .glsl files in the fx folder are never touched.)
 OLD_FILES=(bgx)
 OLD_FX=(rain.glsl stars.glsl)
 FX_DIR="${GHOSTTY_BG_SHARE:-$HOME/.local/share/ghostty-bg}/fx"
@@ -57,14 +58,22 @@ done
 for f in "${OLD_FILES[@]}"; do rm -f "$BIN_DIR/$f"; done
 mkdir -p "$FX_DIR"
 for f in "${OLD_FX[@]}"; do rm -f "$FX_DIR/$f"; done
-for f in "${FX[@]}"; do
+if [[ -n "$SRC_DIR" ]]; then
+  FX_LIST="$(cat "$SRC_DIR/fx/manifest.txt")"
+else
+  FX_LIST="$(curl -fsSL "$REPO_RAW/fx/manifest.txt")"
+fi
+fx_count=0
+while IFS= read -r f; do
+  [[ "$f" == *.glsl ]] || continue
   if [[ -n "$SRC_DIR" ]]; then
     cp "$SRC_DIR/fx/$f" "$FX_DIR/$f"
   else
     curl -fsSL "$REPO_RAW/fx/$f" -o "$FX_DIR/$f"
   fi
-done
-msg "Installed: ${#FX[@]} effects in $FX_DIR" "已安装：${#FX[@]} 个特效，在 $FX_DIR"
+  fx_count=$((fx_count + 1))
+done <<< "$FX_LIST"
+msg "Installed: $fx_count effects in $FX_DIR" "已安装：$fx_count 个特效，在 $FX_DIR"
 
 # The motion shader for the viewing mode (bgv).
 MOTION_DIR="$(dirname "$FX_DIR")/motion"

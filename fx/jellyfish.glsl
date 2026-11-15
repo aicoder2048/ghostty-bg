@@ -1,6 +1,6 @@
 // jellyfish — glowing jellyfish drift upward, bells pulsing, tentacles trailing.
 // zh: 水母
-// group: animals
+// group: ocean
 // Part of ghostty-bg. It only draws on top and never moves or distorts the
 // text underneath (light shapes on dark themes, dark shapes on light themes).
 

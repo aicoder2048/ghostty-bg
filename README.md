@@ -15,7 +15,7 @@ bgd                 # 删掉当前这张（移到废纸篓）/ delete the curren
 bgh                 # 隐藏 / 显示背景图 / hide or show the background
 bga                 # 自动轮播：每 5 秒随机换一张，按任意键停 / auto slideshow, any key stops
 bgv                 # 欣赏模式：清屏只看图，画面慢慢动 / viewing mode: just the picture, slowly moving
-bgf snow            # 动态特效 12 种：雪、极光、鱼群、水母… / 12 animated effects (bgf off to stop)
+bgf snow            # 动态特效 72 种（8 类 × 9）/ 72 animated effects in 8 sets of 9 (bgf off to stop)
 bgm                 # 列出所有命令 / menu of all commands
 ```
 
@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 
 安装脚本会做三件事：
 
-1. 把 `ghostty-bg`（简写 `bgs`）和快捷命令 `bgn`、`bgp`、`bgr`、`bg+`、`bg-`、`bgw`、`bgd`、`bgh`、`bgm`、`bga`、`bgf`、`bgv` 放到 `~/.local/bin`；12 个特效文件放到 `~/.local/share/ghostty-bg/fx/`。
+1. 把 `ghostty-bg`（简写 `bgs`）和快捷命令 `bgn`、`bgp`、`bgr`、`bg+`、`bg-`、`bgw`、`bgd`、`bgh`、`bgm`、`bga`、`bgf`、`bgv` 放到 `~/.local/bin`；72 个特效文件放到 `~/.local/share/ghostty-bg/fx/`。
 2. 运行 `ghostty-bg init`：先**备份**你的 Ghostty 配置，再在末尾加上一行 `config-file = ?background.ghostty`（外加默认透明度 0.2、铺满窗口；你已经设过的不会重复添加）。
 3. 建好图库目录 `backgrounds/`，就在你的 Ghostty 配置文件旁边。
 4. 如果图库是空的，自动放进 3 张样图（AI 生成的风景，见 [`samples/`](samples/)），装完马上就能 `bgn` 体验。已经有图的话不会动。
@@ -71,7 +71,7 @@ cd ghostty-bg && ./install.sh
 | `bgh` | 隐藏背景图；再按一次恢复成刚才那张（= `bgs off` / `bgs on`） |
 | `bga` | 自动轮播：在当前终端里每隔几秒随机换一张，按任意键停。默认 5 秒，也可以 `bga 30s`、`bga 5m`。它在前台运行，不留后台进程，关掉标签页也就结束了 |
 | `bgv` | 欣赏模式：切到一个空白屏幕，只剩背景图（完全不透明），画面像纪录片镜头一样慢慢推近、平移；开着的特效照常。`n` / `p` / `r` 或方向键换图，其他任意键退出，浓度、特效、屏幕内容全部恢复原样 |
-| `bgf <名字>` | 动态特效，叠在背景上，共 12 种（见下面「动态特效」）。`bgf` 列出全部，`bgf next` 逐个换着看，`bgf off` 关掉 |
+| `bgf <名字>` | 动态特效，叠在背景上，8 类共 72 种（见下面「动态特效」）。`bgf` 列出全部，`bgf 动物` 只看一类，`bgf next` / `bgf random` 换，`bgf off` 关掉 |
 | `bgm` | 命令菜单：一屏列出所有快捷命令和当前状态 |
 | `bgs rm <名字>` | 把图库里的图移到废纸篓，名字见 `bgs list`；不写名字就用 fzf 多选（Tab）。只删图库里的副本，你的原图不受影响 |
 | `bgd` | 删掉当前这张，自动换到下一张 |
@@ -104,15 +104,21 @@ cd ghostty-bg && ./install.sh
 
 ### 动态特效
 
-`bgf <名字>` 会在背景上叠一层会动的效果，`bgf off` 关掉。一共 12 种：
+`bgf <名字>` 会在背景上叠一层会动的效果，`bgf off` 关掉。一共 8 类、每类 9 种，共 72 种：
 
-| 组 | 特效 |
+| 类别 | 特效 |
 |---|---|
-| 天气 | `snow` 雪 · `leaves` 秋叶 |
-| 自然 | `ripples` 涟漪 · `bubbles` 气泡 · `petals` 花瓣 · `aurora` 极光 · `meteors` 流星 |
-| 动物 | `fireflies` 萤火虫 · `birds` 飞鸟 · `fish` 鱼群 · `butterflies` 蝴蝶 · `jellyfish` 水母 |
+| 天气 | `drizzle` 细雨 · `fog` 雾 · `frost` 霜花 · `leaves` 秋叶 · `lightning` 闪电 · `rainbow` 彩虹 · `snow` 雪 · `sunbeams` 阳光 · `wind` 风 |
+| 自然 | `aurora` 极光 · `clouds` 浮云 · `dandelion` 蒲公英 · `dew` 露珠 · `embers` 火星 · `grass` 草浪 · `moon` 月亮 · `petals` 花瓣 · `ripples` 涟漪 |
+| 动物 | `ants` 蚂蚁 · `bats` 蝙蝠 · `bees` 蜜蜂 · `birds` 飞鸟 · `butterflies` 蝴蝶 · `cat` 猫 · `dragonflies` 蜻蜓 · `fireflies` 萤火虫 · `rabbit` 兔子 |
+| 海洋 | `bubbles` 气泡 · `caustics` 水光 · `crab` 螃蟹 · `fish` 鱼群 · `jellyfish` 水母 · `seahorse` 海马 · `seaweed` 海草 · `turtle` 海龟 · `whale` 鲸鱼 |
+| 节日 | `balloons` 气球 · `confetti` 彩纸 · `fireworks` 烟花 · `gifts` 礼物 · `hearts` 爱心 · `lanterns` 孔明灯 · `lights` 彩灯 · `pumpkins` 南瓜灯 · `sparklers` 仙女棒 |
+| 太空 | `blackhole` 黑洞 · `comet` 彗星 · `meteors` 流星 · `nebula` 星云 · `planet` 行星 · `rocket` 火箭 · `satellite` 卫星 · `ufo` 飞碟 · `warp` 星河穿梭 |
+| 极客 | `binary` 二进制 · `blocks` 方块 · `coderain` 代码雨 · `neongrid` 霓虹网格 · `pixels` 像素 · `radar` 雷达 · `scanlines` 扫描线 · `vhs` 录像带 · `waveform` 示波器 |
+| 奇幻 | `crystals` 水晶 · `dragon` 龙 · `fairies` 小精灵 · `magiccircle` 魔法阵 · `phoenix` 凤凰 · `portal` 传送门 · `runes` 符文 · `sparkles` 魔法火花 · `wisps` 鬼火 |
 
-不知道选哪个：`bgf next` 一个个换着看。
+- `bgf`：按类列出全部；`bgf 动物`（或 `bgf animals`）：只看一类，带说明
+- `bgf next` / `bgf prev`：一个个换着看；`bgf random`：随机来一个
 
 - 特效是 Ghostty 用显卡跑的 shader，只往画面上叠加图案，不会扭曲文字。
 - 只在当前聚焦的窗口里动，会多用一点 CPU / 显卡；不想要随时 `bgf off`。
@@ -170,11 +176,11 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 bgs add ~/Pictures/some-photo.jpg
 ```
 
-The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` / `bgw` / `bgd` / `bgh` / `bgm` / `bga` / `bgf` / `bgv` in `~/.local/bin` (and twelve effect shaders in `~/.local/share/ghostty-bg/fx`), then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; remove them any time with `bgs rm`.
+The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` / `bgw` / `bgd` / `bgh` / `bgm` / `bga` / `bgf` / `bgv` in `~/.local/bin` (and 72 effect shaders in `~/.local/share/ghostty-bg/fx`), then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; remove them any time with `bgs rm`.
 
 **Commands** (`bgs` = `ghostty-bg`): `bgs add <image|folder> [...]` (a folder adds every PNG/JPG in it; images already in the library are skipped), `bgs list`, `bgs off` / `bgs on`, `bgs rm <name>...` (moves library images to the Trash; no name = pick with fzf), `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random, `bg+` / `bg-` image opacity ±0.05 (or `bgs opacity 0.3`), `bgw` where the files are, `bgd` delete the current image, `bgh` hide / show the background, `bgm` menu of all commands, `bga` auto slideshow in the foreground (a random image every 5s, or `bga 30s` / `bga 5m`; any key stops, no background process).
 
-**Effects:** `bgf <name>` layers an animated shader over the background; `bgf off` stops it, `bgf` lists them and `bgf next` steps through. Twelve effects — weather: `snow`, `leaves`; nature: `ripples`, `bubbles`, `petals`, `aurora`, `meteors`; animals: `fireflies`, `birds`, `fish`, `butterflies`, `jellyfish`. The shaders only draw on top, so text stays sharp; they animate in the focused window and work alongside your own `custom-shader` lines. Add your own `.glsl` files to `~/.local/share/ghostty-bg/fx/`.
+**Effects:** `bgf <name>` layers an animated shader over the background; `bgf off` stops it. `bgf` lists them by category, `bgf <category>` shows one category with descriptions, `bgf next` / `bgf prev` / `bgf random` switch. 72 effects in 8 sets of 9 — weather: `drizzle`, `fog`, `frost`, `leaves`, `lightning`, `rainbow`, `snow`, `sunbeams`, `wind`; nature: `aurora`, `clouds`, `dandelion`, `dew`, `embers`, `grass`, `moon`, `petals`, `ripples`; animals: `ants`, `bats`, `bees`, `birds`, `butterflies`, `cat`, `dragonflies`, `fireflies`, `rabbit`; ocean: `bubbles`, `caustics`, `crab`, `fish`, `jellyfish`, `seahorse`, `seaweed`, `turtle`, `whale`; festival: `balloons`, `confetti`, `fireworks`, `gifts`, `hearts`, `lanterns`, `lights`, `pumpkins`, `sparklers`; space: `blackhole`, `comet`, `meteors`, `nebula`, `planet`, `rocket`, `satellite`, `ufo`, `warp`; geek: `binary`, `blocks`, `coderain`, `neongrid`, `pixels`, `radar`, `scanlines`, `vhs`, `waveform`; fantasy: `crystals`, `dragon`, `fairies`, `magiccircle`, `phoenix`, `portal`, `runes`, `sparkles`, `wisps`. The shaders only draw on top, so text stays sharp; they animate in the focused window and work alongside your own `custom-shader` lines. Add your own `.glsl` files to `~/.local/share/ghostty-bg/fx/`.
 
 **Viewing mode:** `bgv` switches to a blank screen showing only the picture at full opacity, with a slow camera-like push and drift (a motion shader that is safe only because no text is on screen). `n` / `p` / `r` or the arrow keys change the image; any other key leaves and restores opacity, effect and screen.
 

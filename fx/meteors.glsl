@@ -1,6 +1,6 @@
 // meteors — now and then a shooting star crosses the sky.
 // zh: 流星
-// group: nature
+// group: space
 // Part of ghostty-bg. Additive only: it adds light on top and never moves
 // or distorts the text underneath.
 

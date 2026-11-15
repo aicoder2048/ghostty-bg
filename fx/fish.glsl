@@ -1,6 +1,6 @@
 // fish — a few fish swim across the lower half, tails wagging.
 // zh: 鱼群
-// group: animals
+// group: ocean
 // Part of ghostty-bg. It only draws on top and never moves or distorts the
 // text underneath (light shapes on dark themes, dark shapes on light themes).
 

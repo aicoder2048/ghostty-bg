@@ -1,6 +1,6 @@
 // bubbles — thin-walled bubbles rising slowly.
 // zh: 气泡
-// group: nature
+// group: ocean
 // Part of ghostty-bg. Additive only: it adds light on top and never moves
 // or distorts the text underneath.
 
