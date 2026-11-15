@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="1.8.1"
+VERSION="1.9.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -436,6 +436,59 @@ cmd_step() {
   set_image "${images[$idx]}"
 }
 
+# Turn "5", "5s", "2m" or "1h" into whole seconds; prints nothing if it is not valid.
+parse_interval() {
+  local v="$1" n unit
+  [[ "$v" =~ ^([0-9]+)([smh]?)$ ]] || return 0
+  n="${BASH_REMATCH[1]}"; unit="${BASH_REMATCH[2]}"
+  case "$unit" in
+    m) n=$((n * 60)) ;;
+    h) n=$((n * 3600)) ;;
+  esac
+  (( n >= 1 )) && echo "$n"
+}
+
+# bgx / bgs play [interval]: a slideshow that runs in the foreground of this
+# terminal — a new random image every few seconds until a key is pressed.
+# No background process, nothing to clean up: closing the tab ends it too.
+cmd_play() {
+  require_init
+  local secs count img key name shown=0
+  secs="$(parse_interval "${1:-5}")"
+  [[ -n "$secs" ]] ||
+    die "the interval must look like 5, 5s, 2m or 1h: ${1:-}" "间隔要写成 5、5s、2m 或 1h 这样：${1:-}"
+  [[ -t 0 ]] ||
+    die "the slideshow needs a terminal (it stops when you press a key)." "轮播要在终端里运行（按任意键停止）。"
+  count="$(list_images | grep -c . || true)"
+  (( count >= 2 )) ||
+    die "the slideshow needs at least 2 images — add more with: bgs add <image or folder>" \
+        "轮播至少要 2 张图——先多加几张：bgs add <图片或文件夹>"
+
+  msg "Slideshow: a random image every ${secs}s. Press any key to stop." \
+      "轮播中：每 ${secs} 秒随机换一张，按任意键停止。"
+  trap 'printf "\n"; exit 0' INT TERM
+
+  while true; do
+    # One round = every image once, in random order; the image showing right now
+    # is skipped, so a new round never starts with a repeat.
+    while IFS= read -r img; do
+      [[ -f "$img" && "$img" != "$(current_image)" ]] || continue
+      write_include "$img" "$(managed_opacity)"
+      reload_ghostty
+      shown=$((shown + 1))
+      name="$(basename "$img")"
+      printf '\r\033[K  ▶ %s' "$name"
+      # read -t waits for the interval; a key press ends the slideshow.
+      # </dev/tty: the loop's own stdin is the image list.
+      if IFS= read -r -s -n 1 -t "$secs" key </dev/tty; then
+        printf '\r\033[K'
+        msg "Stopped on: $name  ($shown shown)" "已停在：${name}（共换了 ${shown} 张）"
+        return 0
+      fi
+    done < <(list_images | sort -R)
+  done
+}
+
 cmd_pick() {
   require_init
   command -v fzf >/dev/null ||
@@ -654,7 +707,7 @@ cmd_menu() {
   if [[ "$UI_LANG" == zh ]]; then
     cat <<'EOF'
   换图   bgn  下一张      bgp  上一张      bgr  随机一张
-         bgs  挑一张（fzf 预览）
+         bgs  挑一张（fzf 预览）       bgx  轮播，按任意键停
   外观   bg+  浓一点      bg-  淡一点      bgh  隐藏 / 显示
   图库   bgs add <图或文件夹>   加图        bgd  删掉当前这张
          bgs rm <名字>          删图        bgs list  列出
@@ -662,12 +715,12 @@ cmd_menu() {
 
   速记：bg = background，再加一个字母
         n next · p previous · r random · s select
-        h hide · d delete · w where · m menu · + 浓 · - 淡
+        h hide · d delete · w where · m menu · x mix · + 浓 · - 淡
 EOF
   else
     cat <<'EOF'
   switch   bgn  next        bgp  previous    bgr  random
-           bgs  pick one (fzf preview)
+           bgs  pick one (fzf preview)   bgx  slideshow, any key stops
   look     bg+  stronger    bg-  fainter     bgh  hide / show
   library  bgs add <image or folder>  add   bgd  delete current
            bgs rm <name>              remove      bgs list  list
@@ -675,7 +728,7 @@ EOF
 
   memo: bg = background, plus one letter
         n next · p previous · r random · s select
-        h hide · d delete · w where · m menu · + stronger · - fainter
+        h hide · d delete · w where · m menu · x mix · + stronger · - fainter
 EOF
   fi
 }
@@ -704,19 +757,21 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgs               用 fzf 挑一张（装了 chafa 会显示预览）
   bgs next | prev   下一张 / 上一张
   bgs random        随机一张
+  bgs play [间隔]   轮播：在前台每隔几秒随机换一张，按任意键停（默认 5 秒；可写 30s、5m）
   bgs list          列出图库，* 是当前这张
   bgs off | on      隐藏 / 恢复背景图（bgh 在两者之间切换）
   bgs rm <名字>     把图库里的图移到废纸篓（不写名字就用 fzf 多选；原图不受影响）
   bgs opacity       查看背景图浓度；bgs opacity 0.3 设成 0.3；+ / - 每次加减 0.05
   bgs where         显示用到的配置文件和图库位置（= bgw）
 
-快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgh = 隐藏/显示，bgw = 文件在哪，bgd = 删掉当前这张，bgm = 命令菜单
+快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgh = 隐藏/显示，bgw = 文件在哪，bgd = 删掉当前这张，bgm = 命令菜单，bgx = 轮播
 
 缩写怎么来的：bg = background（背景），后面一个字母是动作
   bgs  s = select    挑图          bgn  n = next      下一张
   bgp  p = previous  上一张        bgr  r = random    随机
   bgh  h = hide      隐藏/显示     bgd  d = delete    删掉当前这张
   bgw  w = where     文件在哪      bgm  m = menu      命令菜单
+  bgx  x = mix       轮播（混着放）
   bg+  + = more      浓一点        bg-  - = less      淡一点
 
 语言：GHOSTTY_BG_LANG=zh 或 en（默认跟随 LANG）
@@ -733,19 +788,21 @@ Usage (bgs and ghostty-bg are the same command):
   bgs               pick an image with fzf (preview via chafa, if installed)
   bgs next | prev   switch to the next / previous image
   bgs random        switch to a random image
+  bgs play [time]   slideshow in the foreground: a random image every few seconds, any key stops (default 5s; 30s, 5m)
   bgs list          list the library, * marks the current image
   bgs off | on      hide / bring back the background image (bgh toggles)
   bgs rm <name>     move library images to the Trash (no name: pick with fzf; originals untouched)
   bgs opacity       show the image opacity; bgs opacity 0.3 sets it; + / - step by 0.05
   bgs where         show which files ghostty-bg uses (= bgw)
 
-Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgh = hide/show, bgw = where, bgd = delete the current image, bgm = command menu
+Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgh = hide/show, bgw = where, bgd = delete the current image, bgm = command menu, bgx = slideshow
 
 Where the names come from: bg = background, plus one letter for the action
   bgs  s = select    pick one      bgn  n = next      next image
   bgp  p = previous  previous      bgr  r = random    random image
   bgh  h = hide      hide / show   bgd  d = delete    delete current
   bgw  w = where     file places   bgm  m = menu      command menu
+  bgx  x = mix       slideshow
   bg+  + = more      stronger      bg-  - = less      fainter
 
 Language: GHOSTTY_BG_LANG=zh or en (default: follows LANG)
@@ -771,6 +828,7 @@ main() {
     init)              cmd_init ;;
     add)               shift; cmd_add "$@" ;;
     next|prev|random)  cmd_step "$1" ;;
+    play|slideshow)    shift; cmd_play "${1:-}" ;;
     list|ls)           cmd_list ;;
     off|hide)          cmd_off ;;
     on|show)           cmd_on ;;
