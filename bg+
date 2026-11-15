@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# bg+ — shortcut for `ghostty-bg opacity +`: make the background image a bit stronger.
+exec ghostty-bg opacity + "$@"

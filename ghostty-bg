@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -120,19 +120,37 @@ current_image() {
   sed -n 's/^background-image = "\(.*\)"$/\1/p' "$BG_CONF"
 }
 
-write_include() {
-  # $1: image path, or empty to turn the background off
-  if [[ -n "$1" ]]; then
-    printf '# Managed by ghostty-bg — do not edit by hand. Run `ghostty-bg` to switch.\nbackground-image = "%s"\n' "$1" > "$BG_CONF"
-  else
-    printf '# Managed by ghostty-bg — background image is off.\n' > "$BG_CONF"
+# Opacity set by ghostty-bg (in background.ghostty); empty if not set there.
+managed_opacity() {
+  [[ -f "$BG_CONF" ]] || return 0
+  sed -n 's/^background-image-opacity = \([0-9.]*\)$/\1/p' "$BG_CONF"
+}
+
+# The opacity Ghostty actually uses: background.ghostty is loaded after the main
+# config, so its value wins; then the main config; then Ghostty's default (1).
+effective_opacity() {
+  local v
+  v="$(managed_opacity)"
+  if [[ -z "$v" && -f "$CONFIG_FILE" ]]; then
+    v="$(sed -n 's/^[[:space:]]*background-image-opacity[[:space:]]*=[[:space:]]*\([0-9.]*\).*$/\1/p' "$CONFIG_FILE" | tail -1)"
   fi
+  echo "${v:-1}"
+}
+
+# Rewrite background.ghostty. $1: image path ("" = no image), $2: opacity ("" = not set).
+write_include() {
+  {
+    echo '# Managed by ghostty-bg — do not edit by hand. Run `bgs help` for commands.'
+    [[ -n "$1" ]] && printf 'background-image = "%s"\n' "$1"
+    [[ -n "$2" ]] && printf 'background-image-opacity = %s\n' "$2"
+    true
+  } > "$BG_CONF"
 }
 
 set_image() {
   local img="$1" name
   [[ -f "$img" ]] || die "image not found: $img" "找不到图片：$img"
-  write_include "$img"
+  write_include "$img" "$(managed_opacity)"
   reload_ghostty
   name="$(basename "$img")"
   msg "Background: $name" "背景已换成：$name"
@@ -147,7 +165,7 @@ empty_library() {
 
 cmd_init() {
   mkdir -p "$CONFIG_DIR" "$LIB_DIR"
-  [[ -f "$BG_CONF" ]] || write_include ""
+  [[ -f "$BG_CONF" ]] || write_include "" ""
 
   if is_initialized; then
     msg "Already set up: $CONFIG_FILE" "已经设置过：$CONFIG_FILE"
@@ -252,9 +270,38 @@ cmd_list() {
 
 cmd_off() {
   require_init
-  write_include ""
+  write_include "" "$(managed_opacity)"
   reload_ghostty
   msg "Background image is off." "背景图已关闭。"
+}
+
+OPACITY_STEP="0.05"
+
+# bgs opacity            show the current value
+# bgs opacity <0..1>     set it
+# bgs opacity + | -      step it up / down by OPACITY_STEP
+cmd_opacity() {
+  require_init
+  local arg="${1:-}" cur new
+  cur="$(effective_opacity)"
+  if [[ -z "$arg" ]]; then
+    msg "Background image opacity: $cur   (bg+ / bg- to adjust, or: bgs opacity 0.3)" \
+        "背景图浓度：$cur   （bg+ / bg- 调整，或者：bgs opacity 0.3）"
+    return
+  fi
+  case "$arg" in
+    +) new="$(awk -v c="$cur" -v s="$OPACITY_STEP" 'BEGIN { v = c + s; if (v > 1) v = 1; printf "%.2f", v }')" ;;
+    -) new="$(awk -v c="$cur" -v s="$OPACITY_STEP" 'BEGIN { v = c - s; if (v < 0) v = 0; printf "%.2f", v }')" ;;
+    *)
+      [[ "$arg" =~ ^[0-9]*\.?[0-9]+$ ]] && awk -v v="$arg" 'BEGIN { exit !(v >= 0 && v <= 1) }' ||
+        die "opacity must be a number from 0 to 1, or + / -: $arg" "浓度要是 0 到 1 之间的数字，或者 + / -：$arg"
+      new="$(awk -v v="$arg" 'BEGIN { printf "%.2f", v }')" ;;
+  esac
+  # Tidy the number: 0.30 -> 0.3, 1.00 -> 1, 0.00 -> 0.
+  new="$(awk -v v="$new" 'BEGIN { printf "%g", v }')"
+  write_include "$(current_image)" "$new"
+  reload_ghostty
+  msg "Background image opacity: $cur -> $new" "背景图浓度：$cur -> $new"
 }
 
 cmd_where() {
@@ -282,9 +329,10 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgs random        随机一张
   bgs list          列出图库，* 是当前这张
   bgs off           关掉背景图
+  bgs opacity       查看背景图浓度；bgs opacity 0.3 设成 0.3；+ / - 每次加减 0.05
   bgs where         显示用到的配置文件和图库位置
 
-快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张
+快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点
 
 语言：GHOSTTY_BG_LANG=zh 或 en（默认跟随 LANG）
 EOF
@@ -300,9 +348,10 @@ Usage (bgs and ghostty-bg are the same command):
   bgs random        switch to a random image
   bgs list          list the library, * marks the current image
   bgs off           turn the background image off
+  bgs opacity       show the image opacity; bgs opacity 0.3 sets it; + / - step by 0.05
   bgs where         show which files ghostty-bg uses
 
-Shortcuts: bgn = next, bgp = previous, bgr = random
+Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter
 
 Language: GHOSTTY_BG_LANG=zh or en (default: follows LANG)
 EOF
@@ -328,6 +377,7 @@ main() {
     next|prev|random)  cmd_step "$1" ;;
     list|ls)           cmd_list ;;
     off)               cmd_off ;;
+    opacity)           shift; cmd_opacity "${1:-}" ;;
     where)             cmd_where ;;
     -v|--version)      echo "ghostty-bg $VERSION" ;;
     -h|--help|help)    usage ;;

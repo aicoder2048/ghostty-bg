@@ -25,8 +25,8 @@ fi
 
 REPO_RAW="https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main"
 BIN_DIR="${GHOSTTY_BG_BIN:-$HOME/.local/bin}"
-# ghostty-bg is the main command; bgn / bgp / bgr are one-line shortcuts.
-FILES=(ghostty-bg bgn bgp bgr)
+# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- are one-line shortcuts.
+FILES=(ghostty-bg bgn bgp bgr bg+ bg-)
 
 mkdir -p "$BIN_DIR"
 
@@ -40,7 +40,7 @@ for f in "${FILES[@]}"; do
   if [[ -n "$SRC_DIR" ]]; then
     cp "$SRC_DIR/$f" "$BIN_DIR/$f"
   else
-    curl -fsSL "$REPO_RAW/$f" -o "$BIN_DIR/$f"
+    curl -fsSL "$REPO_RAW/${f//+/%2B}" -o "$BIN_DIR/$f"   # "+" encoded for the URL
   fi
   chmod +x "$BIN_DIR/$f"
   msg "Installed: $BIN_DIR/$f" "已安装：$BIN_DIR/$f"
