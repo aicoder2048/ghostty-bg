@@ -1,13 +1,19 @@
-// whale — now and then a big whale glides slowly across, its tail fluke beating.
+// whale — a big whale glides slowly across, fluke beating, now and then blowing a spout.
 // zh: 鲸鱼
 // group: ocean
 // Part of ghostty-bg. It only draws on top and never moves or distorts the
 // text underneath (light shapes on dark themes, dark shapes on light themes).
 
-const float INTENSITY = 0.30;   // overall strength (0 = off); kept low because the whale is big
-const float PERIOD    = 80.0;   // seconds from the start of one crossing to the next
-const float CROSS     = 48.0;   // seconds one crossing takes
-const float SIZE      = 0.20;   // half the body length, as a fraction of the window height
+const float INTENSITY = 0.32;   // overall strength (0 = off); kept low because the whale is big
+const float PERIOD    = 42.0;   // seconds from the start of one crossing to the next
+const float CROSS     = 30.0;   // seconds one crossing takes (then about 12 s of open water)
+const float WIDTH     = 0.38;   // whale length as a fraction of the window width
+const float SPOUT     = 7.0;    // seconds between two spouts
+const int   DROPS     = 20;     // water drops in one spout
+
+float hash1(float n) {
+    return fract(sin(n) * 43758.5453123);
+}
 
 // Distance to the segment a-b, and how far along it (0 at a, 1 at b).
 vec2 segment(vec2 p, vec2 a, vec2 b) {
@@ -72,6 +78,33 @@ float whale(vec2 q, float beat, float fin, float aa) {
     return shape * (1.0 - 0.3 * shade) * (1.0 - 0.85 * eye - 0.6 * mouth - 0.3 * grooves);
 }
 
+// A spout: drops thrown up from the blowhole in a narrow fan, falling back
+// under gravity and drifting behind the whale as it swims on. q is in whale
+// units, age is seconds since the spout started.
+float spout(vec2 q, float age) {
+    vec2 hole = vec2(0.52, 0.17);
+    float light = 0.0;
+    for (int k = 0; k < DROPS; k++) {
+        float fk = float(k);
+        float a = age - fk * 0.04;                                // drops leave one after another
+        if (a < 0.0 || a > 2.2) continue;
+        float h1 = hash1(fk * 12.9898 + 1.0);
+        float h2 = hash1(fk * 78.233 + 2.0);
+        vec2 v = vec2((h1 - 0.5) * 0.8, 2.0 + 0.8 * h2);           // up, spreading into a V
+        vec2 pos = hole + v * a + vec2(-0.25 * a, -1.4 * a * a);  // gravity, and left behind
+        float r = mix(0.030, 0.055, h2) * (1.0 + 0.6 * a);         // drops spread into mist
+        float fade = 1.0 - a / 2.2;
+        light += smoothstep(r, r * 0.3, length(q - pos)) * fade * 0.8;
+    }
+    // A soft misty column shooting up first, then thinning out.
+    float rise = min(age * 2.5, 1.0) * 0.85;
+    vec2 pa = q - hole;
+    float hcol = clamp(pa.y / max(rise, 0.01), 0.0, 1.0);
+    float col = smoothstep(0.10, 0.0, length(pa - vec2(-0.08 * hcol, rise * hcol)) - 0.03 * hcol);
+    light += col * 0.5 * max(0.0, 1.0 - age / 1.6);
+    return min(light, 1.0);
+}
+
 vec3 blend(vec3 base, vec3 color, float a) {
     float lum = dot(iBackgroundColor, vec3(0.299, 0.587, 0.114));
     a = clamp(a, 0.0, 1.0);
@@ -87,28 +120,33 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // easier to think about with y pointing up, so flip it once here.
     vec2 p = vec2(uv.x * aspect, 1.0 - uv.y);
 
-    // Shift the clock so a whale is already crossing when the effect starts.
-    float clock = iTime + 20.0;
+    // Big things big: the whale is a fixed share of the window width, capped so a
+    // very wide window does not make it taller than the lower half.
+    float size = min(WIDTH * aspect / 2.45, 0.42);               // half the body length
+
+    // Shift the clock so the whale is already well inside the window at start.
+    float clock = iTime + 0.30 * CROSS;
     float t = mod(clock, PERIOD) / CROSS;                        // 0..1 while crossing
     float dir = mod(floor(clock / PERIOD), 2.0) < 0.5 ? 1.0 : -1.0;   // alternate sides
 
     vec3 rgb = base.rgb;
     if (t < 1.0) {
-        float margin = 1.5 * SIZE;                               // fluke tip to snout
+        float margin = 1.45 * size;                              // fluke tip to snout
         float x = mix(-margin, aspect + margin, t);
         if (dir < 0.0) x = aspect - x;
         float y = 0.30 + 0.03 * sin(clock * 0.25);
         float tilt = 0.06 * cos(clock * 0.25);                   // nose follows the slow rise and fall
 
-        vec2 q = (p - vec2(x, y)) / SIZE;
+        vec2 q = (p - vec2(x, y)) / size;
         q.x *= dir;                                              // face the way it swims
         q = mat2(cos(tilt), -sin(tilt), sin(tilt), cos(tilt)) * q;
 
         float beat = sin(clock * 0.9);
         float fin = sin(clock * 0.45 + 1.0);
-        float aa = 1.5 / (iResolution.y * SIZE);
-        vec3 color = vec3(0.62, 0.82, 1.0);
-        rgb = blend(rgb, color, whale(q, beat, fin, aa) * INTENSITY);
+        float aa = 1.5 / (iResolution.y * size);
+        float a = whale(q, beat, fin, aa);
+        a = max(a, spout(q, mod(iTime - 1.5, SPOUT)) * 0.9);   // first spout 1.5 s in
+        rgb = blend(rgb, vec3(0.62, 0.82, 1.0), a * INTENSITY);
     }
 
     fragColor = vec4(rgb, base.a);
