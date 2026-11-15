@@ -1,4 +1,6 @@
 // fireflies — a few warm lights wandering slowly and pulsing.
+// zh: 萤火虫
+// group: animals
 // Part of ghostty-bg. Additive only: it adds light on top and never moves
 // or distorts the text underneath.
 

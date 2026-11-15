@@ -27,7 +27,7 @@ fi
 REPO_RAW="${GHOSTTY_BG_REPO_RAW:-https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main}"
 SAMPLES=(sunset-sea.jpg atoll-aerial.jpg savanna.jpg)
 # Animated effects (GLSL shaders) for `bgf`; ghostty-bg looks for them here.
-FX=(snow.glsl rain.glsl fireflies.glsl stars.glsl)
+FX=(snow.glsl rain.glsl stars.glsl bubbles.glsl petals.glsl aurora.glsl meteors.glsl fireflies.glsl birds.glsl fish.glsl butterflies.glsl jellyfish.glsl)
 FX_DIR="${GHOSTTY_BG_SHARE:-$HOME/.local/share/ghostty-bg}/fx"
 BIN_DIR="${GHOSTTY_BG_BIN:-$HOME/.local/bin}"
 # ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd / bgh / bgm / bgx / bgf are one-line shortcuts.

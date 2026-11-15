@@ -1,4 +1,6 @@
 // snow — slow snowflakes drifting down over the terminal.
+// zh: 雪
+// group: weather
 // Part of ghostty-bg. Additive only: it adds light on top and never moves
 // or distorts the text underneath.
 

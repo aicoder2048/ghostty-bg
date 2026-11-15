@@ -1,4 +1,6 @@
 // rain — thin slanted rain streaks.
+// zh: 雨
+// group: weather
 // Part of ghostty-bg. Additive only: it adds light on top and never moves
 // or distorts the text underneath.
 

@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="1.10.0"
+VERSION="1.11.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -200,6 +200,22 @@ managed_fx() {
 
 fx_name() { basename "${1%.glsl}"; }
 
+# Each shader starts with comment lines such as "// zh: 雪" and "// group: weather".
+fx_meta() { sed -n "s|^// $2: *||p" "$1" | head -1; }
+fx_group() {
+  local g
+  g="$(fx_meta "$1" group)"
+  case "$g" in weather|nature|animals) echo "$g" ;; *) echo other ;; esac
+}
+# Short description: the Chinese name, or the text after the dash on line 1.
+fx_label() {
+  if [[ "$UI_LANG" == zh ]]; then
+    fx_meta "$1" zh
+  else
+    sed -n '1s|^// [a-z]* — ||p' "$1"
+  fi
+}
+
 list_fx() {
   [[ -d "$FX_DIR" ]] || return 0
   find "$FX_DIR" -maxdepth 1 -type f -name '*.glsl' | sort
@@ -217,17 +233,55 @@ cmd_fx() {
     [[ -n "$(list_fx)" ]] ||
       die "no effects are installed in $FX_DIR — run the installer again." \
           "$FX_DIR 里没有特效——请重新运行一次安装命令。"
-    while IFS= read -r f; do
-      if [[ "$f" == "$cur" ]]; then echo "* $(fx_name "$f")"; else echo "  $(fx_name "$f")"; fi
-    done < <(list_fx)
+    # Grouped by the "// group:" line of each shader; anything else goes last.
+    local group title mark listed=""
+    for group in weather nature animals other; do
+      title=""
+      while IFS= read -r f; do
+        [[ "$(fx_group "$f")" == "$group" ]] || continue
+        if [[ -z "$title" ]]; then
+          case "$group" in
+            weather) title="$(msg 'Weather' '天气')" ;;
+            nature)  title="$(msg 'Nature' '自然')" ;;
+            animals) title="$(msg 'Animals' '动物')" ;;
+            *)       title="$(msg 'Other' '其他')" ;;
+          esac
+          [[ -z "$listed" ]] || echo
+          echo "$title"
+          listed=1
+        fi
+        mark="  "
+        [[ "$f" == "$cur" ]] && mark="* "
+        printf '%s%-12s %s\n' "$mark" "$(fx_name "$f")" "$(fx_label "$f")"
+      done < <(list_fx)
+    done
     echo
     if [[ -n "$cur" ]]; then
-      msg "On: $(fx_name "$cur").  bgf <name> to switch, bgf off to stop." \
-          "当前特效：$(fx_name "$cur")。换一个：bgf <名字>；关掉：bgf off"
+      msg "On: $(fx_name "$cur").  bgf <name> or bgf next to switch, bgf off to stop." \
+          "当前特效：$(fx_name "$cur")。换一个：bgf <名字> 或 bgf next；关掉：bgf off"
     else
-      msg "No effect is on.  bgf <name> switches one on." "现在没有开特效。开启：bgf <名字>"
+      msg "No effect is on.  bgf <name> switches one on, bgf next steps through them." \
+          "现在没有开特效。开启：bgf <名字>；逐个看：bgf next"
     fi
     return
+  fi
+
+  # next / prev: step through the effects in list order, to try them one by one.
+  if [[ "$want" == next || "$want" == prev ]]; then
+    local first="" last="" prevf="" pick="" take=0
+    while IFS= read -r f; do
+      [[ -n "$first" ]] || first="$f"
+      if (( take )); then pick="$f"; take=0; fi
+      if [[ "$f" == "$cur" ]]; then
+        if [[ "$want" == next ]]; then take=1; else pick="$prevf"; fi
+      fi
+      prevf="$f"; last="$f"
+    done < <(list_fx)
+    [[ -n "$first" ]] || die "no effects are installed in $FX_DIR." "$FX_DIR 里没有特效。"
+    if [[ -z "$pick" ]]; then
+      if [[ "$want" == next ]]; then pick="$first"; else pick="$last"; fi
+    fi
+    want="$(fx_name "$pick")"
   fi
 
   if [[ "$want" == off || "$want" == none ]]; then
@@ -247,8 +301,10 @@ cmd_fx() {
   FX_NEXT="$found"
   write_include "$(current_image)" "$(managed_opacity)" "$(hidden_image)"
   reload_ghostty
-  msg "Effect: $want  (animates in the focused window; bgf off stops it)" \
-      "特效：${want}（在当前聚焦的窗口里动；bgf off 关掉）"
+  local label
+  label="$(fx_label "$found")"
+  msg "Effect: $want — $label  (animates in the focused window; bgf off stops it)" \
+      "特效：${want} ${label}（在当前聚焦的窗口里动；bgf off 关掉）"
 }
 
 set_image() {
@@ -783,7 +839,7 @@ cmd_menu() {
   换图   bgn  下一张      bgp  上一张      bgr  随机一张
          bgs  挑一张（fzf 预览）       bgx  轮播，按任意键停
   外观   bg+  浓一点      bg-  淡一点      bgh  隐藏 / 显示
-         bgf  特效（bgf snow / rain / fireflies / stars / off）
+         bgf  特效 12 种（bgf 列出，bgf next 换一个，bgf off 关）
   图库   bgs add <图或文件夹>   加图        bgd  删掉当前这张
          bgs rm <名字>          删图        bgs list  列出
   其他   bgw  文件在哪    bgm  这个菜单    bgs help  完整帮助
@@ -798,7 +854,7 @@ EOF
   switch   bgn  next        bgp  previous    bgr  random
            bgs  pick one (fzf preview)   bgx  slideshow, any key stops
   look     bg+  stronger    bg-  fainter     bgh  hide / show
-           bgf  effects (bgf snow / rain / fireflies / stars / off)
+           bgf  12 effects (bgf lists, bgf next steps, bgf off stops)
   library  bgs add <image or folder>  add   bgd  delete current
            bgs rm <name>              remove      bgs list  list
   more     bgw  where       bgm  this menu   bgs help  full help
@@ -838,7 +894,7 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgs play [间隔]   轮播：在前台每隔几秒随机换一张，按任意键停（默认 5 秒；可写 30s、5m）
   bgs list          列出图库，* 是当前这张
   bgs off | on      隐藏 / 恢复背景图（bgh 在两者之间切换）
-  bgs fx [名字]     动态特效：snow 雪、rain 雨、fireflies 萤火虫、stars 星星；off 关掉；不写名字就列出
+  bgs fx [名字]     动态特效 12 种（天气 / 自然 / 动物）：不写名字就列出；next / prev 逐个换；off 关掉
   bgs rm <名字>     把图库里的图移到废纸篓（不写名字就用 fzf 多选；原图不受影响）
   bgs opacity       查看背景图浓度；bgs opacity 0.3 设成 0.3；+ / - 每次加减 0.05
   bgs where         显示用到的配置文件和图库位置（= bgw）
@@ -870,7 +926,7 @@ Usage (bgs and ghostty-bg are the same command):
   bgs play [time]   slideshow in the foreground: a random image every few seconds, any key stops (default 5s; 30s, 5m)
   bgs list          list the library, * marks the current image
   bgs off | on      hide / bring back the background image (bgh toggles)
-  bgs fx [name]     animated effect: snow, rain, fireflies, stars; off stops it; no name lists them
+  bgs fx [name]     12 animated effects (weather / nature / animals): no name lists them; next / prev step; off stops
   bgs rm <name>     move library images to the Trash (no name: pick with fzf; originals untouched)
   bgs opacity       show the image opacity; bgs opacity 0.3 sets it; + / - step by 0.05
   bgs where         show which files ghostty-bg uses (= bgw)

@@ -1,4 +1,6 @@
 // stars — a still field of small stars that twinkle.
+// zh: 星星
+// group: nature
 // Part of ghostty-bg. Additive only: it adds light on top and never moves
 // or distorts the text underneath.
 
