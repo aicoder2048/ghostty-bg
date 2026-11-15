@@ -29,12 +29,15 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 1. 把 `ghostty-bg`（简写 `bgs`）和快捷命令 `bgn`、`bgp`、`bgr`、`bg+`、`bg-` 放到 `~/.local/bin`。
 2. 运行 `ghostty-bg init`：先**备份**你的 Ghostty 配置，再在末尾加上一行 `config-file = ?background.ghostty`（外加默认透明度 0.2、铺满窗口；你已经设过的不会重复添加）。
 3. 建好图库目录 `backgrounds/`，就在你的 Ghostty 配置文件旁边。
+4. 如果图库是空的，自动放进 3 张样图（AI 生成的风景，见 [`samples/`](samples/)），装完马上就能 `bgn` 体验。已经有图的话不会动。
 
-然后加第一张图：
+加你自己的图：
 
 ```bash
 bgs add ~/Pictures/some-photo.jpg
 ```
+
+样图不需要的话，`bgs where` 找到图库目录，把 `sunset-sea.jpg`、`atoll-aerial.jpg`、`savanna.jpg` 删掉就行。
 
 > 如果提示 `~/.local/bin` 不在 PATH 里，按提示把那行 `export PATH=...` 加进 `~/.zshrc`，再开一个新终端。
 
@@ -104,7 +107,7 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 bgs add ~/Pictures/some-photo.jpg
 ```
 
-The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` in `~/.local/bin`, then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them).
+The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` in `~/.local/bin`, then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; delete them any time.
 
 **Commands** (`bgs` = `ghostty-bg`): `bgs add <image>`, `bgs list`, `bgs off`, `bgs where`, `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random, `bg+` / `bg-` image opacity ±0.05 (or `bgs opacity 0.3`).
 
@@ -116,4 +119,6 @@ The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bg
 
 ## License
 
-MIT
+Code: MIT. Sample images in `samples/` are AI-generated with FLUX — see [`samples/NOTICE.md`](samples/NOTICE.md).
+
+代码：MIT。`samples/` 里的样图是用 FLUX AI 生成的，说明见 [`samples/NOTICE.md`](samples/NOTICE.md)。

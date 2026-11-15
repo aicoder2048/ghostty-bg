@@ -1,4 +1,5 @@
-# Never commit images or local Ghostty config — this repo ships code only.
+# Never commit images or local Ghostty config — this repo ships code only,
+# except the AI-generated sample images in samples/.
 *.png
 *.jpg
 *.jpeg
@@ -7,3 +8,4 @@
 *.ghostty
 backgrounds/
 .DS_Store
+!samples/*.jpg
