@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-VERSION="1.4.0"
+VERSION="1.5.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -196,26 +196,100 @@ cmd_init() {
   msg "Next: bgs add ~/Pictures/some-photo.jpg   (bgs = ghostty-bg)" "下一步：bgs add ~/Pictures/某张照片.jpg   （bgs 就是 ghostty-bg）"
 }
 
-cmd_add() {
-  require_init
-  local src="${1:-}" name dest
-  [[ -n "$src" ]] || die "usage: ghostty-bg add <image.png|image.jpg>" "用法：ghostty-bg add <图片.png|图片.jpg>"
-  [[ -f "$src" ]] || die "image not found: $src" "找不到图片：$src"
-  case "$(printf '%s' "$src" | tr '[:upper:]' '[:lower:]')" in
-    *.png|*.jpg|*.jpeg) ;;
-    *) die "only PNG and JPG are supported: $src" "只支持 PNG 和 JPG：$src" ;;
+is_image() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    *.png|*.jpg|*.jpeg) return 0 ;;
+    *) return 1 ;;
   esac
-  mkdir -p "$LIB_DIR"
+}
+
+# Print the library file whose content is identical to $1, if any.
+find_duplicate() {
+  local src="$1" size f
+  size="$(stat -f %z "$src")"
+  while IFS= read -r f; do
+    if [[ "$(stat -f %z "$f")" == "$size" ]] && cmp -s "$src" "$f"; then
+      echo "$f"
+      return
+    fi
+  done < <(list_images)
+}
+
+# State shared by add_one / cmd_add (plain variables: bash 3.2 + set -u dislikes empty arrays).
+ADD_FIRST=""     # first image newly copied into the library
+ADD_COUNT=0      # images copied
+SKIP_COUNT=0     # images skipped (already in the library, or not PNG/JPG)
+DUP_FOUND=""     # library copy of the last already-present image
+
+add_one() {
+  local src="$1" dup name dest n=1
+  dup="$(find_duplicate "$src")"
+  if [[ -n "$dup" ]]; then
+    msg "  already in library: $(basename "$dup")" "  图库里已有：$(basename "$dup")"
+    DUP_FOUND="$dup"
+    SKIP_COUNT=$((SKIP_COUNT + 1))
+    return
+  fi
   name="$(basename "$src")"
   dest="$LIB_DIR/$name"
-  # Same name but different content: keep both.
-  if [[ -e "$dest" ]] && ! cmp -s "$src" "$dest"; then
-    dest="$LIB_DIR/$(date +%Y%m%d_%H%M%S)-$name"
+  # Same name but different content: keep both, the new one gets a timestamp prefix
+  # (plus a counter if that name is taken too, e.g. several in the same second).
+  if [[ -e "$dest" ]]; then
+    local stamp
+    stamp="$(date +%Y%m%d_%H%M%S)"
+    dest="$LIB_DIR/$stamp-$name"
+    while [[ -e "$dest" ]]; do
+      n=$((n + 1))
+      dest="$LIB_DIR/$stamp-$n-$name"
+    done
   fi
-  [[ -e "$dest" ]] || cp "$src" "$dest"
-  name="$(basename "$dest")"
-  msg "Added to library: $name" "已加入图库：$name"
-  set_image "$dest"
+  cp "$src" "$dest"
+  msg "  added: $(basename "$dest")" "  已加入：$(basename "$dest")"
+  [[ -n "$ADD_FIRST" ]] || ADD_FIRST="$dest"
+  ADD_COUNT=$((ADD_COUNT + 1))
+}
+
+# bgs add <image|folder> [more images or folders...]
+# A folder adds every PNG/JPG directly inside it (not subfolders).
+cmd_add() {
+  require_init
+  (( $# > 0 )) || die "usage: bgs add <image|folder> [...]" "用法：bgs add <图片|文件夹> [...]"
+  mkdir -p "$LIB_DIR"
+  local arg f found
+  for arg in "$@"; do
+    if [[ -d "$arg" ]]; then
+      found=0
+      while IFS= read -r f; do
+        found=1
+        add_one "$f"
+      done < <(find "$arg" -maxdepth 1 -type f \
+                 \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) | sort)
+      (( found )) || msg "  no PNG/JPG in folder: $arg" "  文件夹里没有 PNG/JPG：$arg"
+    elif [[ -f "$arg" ]]; then
+      if is_image "$arg"; then
+        add_one "$arg"
+      else
+        msg "  skipped (only PNG and JPG are supported): $arg" "  跳过（只支持 PNG 和 JPG）：$arg"
+        SKIP_COUNT=$((SKIP_COUNT + 1))
+      fi
+    else
+      msg "  not found: $arg" "  找不到：$arg"
+      SKIP_COUNT=$((SKIP_COUNT + 1))
+    fi
+  done
+
+  if (( ADD_COUNT + SKIP_COUNT > 1 )); then
+    msg "Added $ADD_COUNT, skipped $SKIP_COUNT." "加入 $ADD_COUNT 张，跳过 $SKIP_COUNT 张。"
+  fi
+  if [[ -n "$ADD_FIRST" ]]; then
+    set_image "$ADD_FIRST"
+  elif [[ $# -eq 1 && -f "$1" && -n "$DUP_FOUND" ]]; then
+    set_image "$DUP_FOUND"      # a single image that is already there: just switch to it
+  elif [[ -n "$DUP_FOUND" ]]; then
+    msg "Nothing new — those images are already in the library." "没有新图片——这些图都已经在图库里了。"
+  else
+    die "nothing was added." "没有加入任何图片。"
+  fi
 }
 
 cmd_step() {
@@ -323,7 +397,7 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
 
 用法（下面的 bgs 都可以写成 ghostty-bg）：
   bgs init          首次设置：接入你的 Ghostty 配置，建好图库目录
-  bgs add <图片>    把图片（PNG/JPG）复制进图库并设为背景
+  bgs add <图片或文件夹>  复制进图库并设为背景（文件夹会加入里面所有 PNG/JPG）
   bgs               用 fzf 挑一张（装了 chafa 会显示预览）
   bgs next | prev   下一张 / 上一张
   bgs random        随机一张
@@ -342,7 +416,7 @@ ghostty-bg (short: bgs) — switch the Ghostty terminal background image with on
 
 Usage (bgs and ghostty-bg are the same command):
   bgs init          one-time setup: hook into your Ghostty config, create the image folder
-  bgs add <image>   copy an image (PNG/JPG) into the library and use it
+  bgs add <image or folder>  copy into the library and use it (a folder adds every PNG/JPG in it)
   bgs               pick an image with fzf (preview via chafa, if installed)
   bgs next | prev   switch to the next / previous image
   bgs random        switch to a random image
@@ -373,7 +447,7 @@ main() {
   case "${1:-}" in
     "")                pick_or_help ;;
     init)              cmd_init ;;
-    add)               shift; cmd_add "${1:-}" ;;
+    add)               shift; cmd_add "$@" ;;
     next|prev|random)  cmd_step "$1" ;;
     list|ls)           cmd_list ;;
     off)               cmd_off ;;
@@ -382,8 +456,8 @@ main() {
     -v|--version)      echo "ghostty-bg $VERSION" ;;
     -h|--help|help)    usage ;;
     *)
-      # Shortcut: `ghostty-bg <image>` works like `ghostty-bg add <image>`.
-      if [[ -f "$1" ]]; then cmd_add "$1"; else usage; exit 1; fi ;;
+      # Shortcut: `ghostty-bg <image|folder>` works like `ghostty-bg add <image|folder>`.
+      if [[ -f "$1" || -d "$1" ]]; then cmd_add "$@"; else usage; exit 1; fi ;;
   esac
 }
 

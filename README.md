@@ -32,10 +32,11 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 3. 建好图库目录 `backgrounds/`，就在你的 Ghostty 配置文件旁边。
 4. 如果图库是空的，自动放进 3 张样图（AI 生成的风景，见 [`samples/`](samples/)），装完马上就能 `bgn` 体验。已经有图的话不会动。
 
-加你自己的图：
+加你自己的图（可以是单张、多张，或者整个文件夹）：
 
 ```bash
 bgs add ~/Pictures/some-photo.jpg
+bgs add ~/Pictures/壁纸/          # 加入文件夹里所有 PNG/JPG（不含子文件夹）
 ```
 
 样图不需要的话，`bgw` 找到图库目录，把 `sunset-sea.jpg`、`atoll-aerial.jpg`、`savanna.jpg` 删掉就行。
@@ -55,7 +56,7 @@ cd ghostty-bg && ./install.sh
 
 | 命令 | 作用 |
 |---|---|
-| `bgs add <图片>` | 把图片复制进图库并设为背景（PNG / JPG） |
+| `bgs add <图片或文件夹>` | 复制进图库并设为背景（PNG / JPG）；文件夹会加入里面所有图片，可以一次给多个；图库里已有的同一张图会自动跳过 |
 | `bgn` | 下一张（= `bgs next`） |
 | `bgp` | 上一张（= `bgs prev`） |
 | `bgr` | 随机一张（= `bgs random`） |
@@ -110,7 +111,7 @@ bgs add ~/Pictures/some-photo.jpg
 
 The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` / `bgw` in `~/.local/bin`, then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; delete them any time.
 
-**Commands** (`bgs` = `ghostty-bg`): `bgs add <image>`, `bgs list`, `bgs off`, `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random, `bg+` / `bg-` image opacity ±0.05 (or `bgs opacity 0.3`), `bgw` where the files are.
+**Commands** (`bgs` = `ghostty-bg`): `bgs add <image|folder> [...]` (a folder adds every PNG/JPG in it; images already in the library are skipped), `bgs list`, `bgs off`, `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random, `bg+` / `bg-` image opacity ±0.05 (or `bgs opacity 0.3`), `bgw` where the files are.
 
 **Language:** messages are in Chinese when `LANG` starts with `zh`, English otherwise. Override with `export GHOSTTY_BG_LANG=en` (or `zh`).
 
