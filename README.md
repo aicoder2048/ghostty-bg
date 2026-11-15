@@ -14,6 +14,7 @@ bgw                 # 配置文件和图库在哪 / where the files are
 bgd                 # 删掉当前这张（移到废纸篓）/ delete the current image (to Trash)
 bgh                 # 隐藏 / 显示背景图 / hide or show the background
 bgx                 # 轮播：每 5 秒随机换一张，按任意键停 / slideshow, any key stops
+bgv                 # 欣赏模式：清屏只看图，画面慢慢动 / viewing mode: just the picture, slowly moving
 bgf snow            # 动态特效 12 种：雪、极光、鱼群、水母… / 12 animated effects (bgf off to stop)
 bgm                 # 列出所有命令 / menu of all commands
 ```
@@ -32,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 
 安装脚本会做三件事：
 
-1. 把 `ghostty-bg`（简写 `bgs`）和快捷命令 `bgn`、`bgp`、`bgr`、`bg+`、`bg-`、`bgw`、`bgd`、`bgh`、`bgm`、`bgx`、`bgf` 放到 `~/.local/bin`；12 个特效文件放到 `~/.local/share/ghostty-bg/fx/`。
+1. 把 `ghostty-bg`（简写 `bgs`）和快捷命令 `bgn`、`bgp`、`bgr`、`bg+`、`bg-`、`bgw`、`bgd`、`bgh`、`bgm`、`bgx`、`bgf`、`bgv` 放到 `~/.local/bin`；12 个特效文件放到 `~/.local/share/ghostty-bg/fx/`。
 2. 运行 `ghostty-bg init`：先**备份**你的 Ghostty 配置，再在末尾加上一行 `config-file = ?background.ghostty`（外加默认透明度 0.2、铺满窗口；你已经设过的不会重复添加）。
 3. 建好图库目录 `backgrounds/`，就在你的 Ghostty 配置文件旁边。
 4. 如果图库是空的，自动放进 3 张样图（AI 生成的风景，见 [`samples/`](samples/)），装完马上就能 `bgn` 体验。已经有图的话不会动。
@@ -69,6 +70,7 @@ cd ghostty-bg && ./install.sh
 | `bgs list` | 列出图库，`*` 是当前这张 |
 | `bgh` | 隐藏背景图；再按一次恢复成刚才那张（= `bgs off` / `bgs on`） |
 | `bgx` | 轮播：在当前终端里每隔几秒随机换一张，按任意键停。默认 5 秒，也可以 `bgx 30s`、`bgx 5m`。它在前台运行，不留后台进程，关掉标签页也就结束了 |
+| `bgv` | 欣赏模式：切到一个空白屏幕，只剩背景图（完全不透明），画面像纪录片镜头一样慢慢推近、平移；开着的特效照常。`n` / `p` / `r` 或方向键换图，其他任意键退出，浓度、特效、屏幕内容全部恢复原样 |
 | `bgf <名字>` | 动态特效，叠在背景上，共 12 种（见下面「动态特效」）。`bgf` 列出全部，`bgf next` 逐个换着看，`bgf off` 关掉 |
 | `bgm` | 命令菜单：一屏列出所有快捷命令和当前状态 |
 | `bgs rm <名字>` | 把图库里的图移到废纸篓，名字见 `bgs list`；不写名字就用 fzf 多选（Tab）。只删图库里的副本，你的原图不受影响 |
@@ -95,6 +97,7 @@ cd ghostty-bg && ./install.sh
 | `bgm` | **m**enu | 命令菜单 |
 | `bgx` | mi**x** | 轮播（混着放） |
 | `bgf` | e**f**fects | 动态特效 |
+| `bgv` | **v**iew | 欣赏模式 |
 | `bg+` / `bg-` | 多一点 / 少一点 | 背景图浓一点 / 淡一点 |
 
 忘了也没关系：敲 `bgm`，菜单最下面就有这张速记。
@@ -150,7 +153,7 @@ export GHOSTTY_BG_LANG=zh   # 或 en
 ## 卸载
 
 ```bash
-rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-,bgw,bgd,bgh,bgm,bgx,bgf}
+rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-,bgw,bgd,bgh,bgm,bgx,bgf,bgv}
 rm -r ~/.local/share/ghostty-bg
 ```
 
@@ -167,21 +170,23 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 bgs add ~/Pictures/some-photo.jpg
 ```
 
-The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` / `bgw` / `bgd` / `bgh` / `bgm` / `bgx` / `bgf` in `~/.local/bin` (and twelve effect shaders in `~/.local/share/ghostty-bg/fx`), then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; remove them any time with `bgs rm`.
+The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` / `bgw` / `bgd` / `bgh` / `bgm` / `bgx` / `bgf` / `bgv` in `~/.local/bin` (and twelve effect shaders in `~/.local/share/ghostty-bg/fx`), then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; remove them any time with `bgs rm`.
 
 **Commands** (`bgs` = `ghostty-bg`): `bgs add <image|folder> [...]` (a folder adds every PNG/JPG in it; images already in the library are skipped), `bgs list`, `bgs off` / `bgs on`, `bgs rm <name>...` (moves library images to the Trash; no name = pick with fzf), `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random, `bg+` / `bg-` image opacity ±0.05 (or `bgs opacity 0.3`), `bgw` where the files are, `bgd` delete the current image, `bgh` hide / show the background, `bgm` menu of all commands, `bgx` slideshow in the foreground (a random image every 5s, or `bgx 30s` / `bgx 5m`; any key stops, no background process).
 
 **Effects:** `bgf <name>` layers an animated shader over the background; `bgf off` stops it, `bgf` lists them and `bgf next` steps through. Twelve effects — weather: `snow`, `rain`; nature: `stars`, `bubbles`, `petals`, `aurora`, `meteors`; animals: `fireflies`, `birds`, `fish`, `butterflies`, `jellyfish`. The shaders only draw on top, so text stays sharp; they animate in the focused window and work alongside your own `custom-shader` lines. Add your own `.glsl` files to `~/.local/share/ghostty-bg/fx/`.
 
+**Viewing mode:** `bgv` switches to a blank screen showing only the picture at full opacity, with a slow camera-like push and drift (a motion shader that is safe only because no text is on screen). `n` / `p` / `r` or the arrow keys change the image; any other key leaves and restores opacity, effect and screen.
+
 **Portrait images:** anything narrower than 1.2:1 would be cropped heavily in a wide terminal. With ImageMagick installed, `bgs add` stores a 16:10 version with the photo centered and blurred sides (your original is untouched); without it, or with `GHOSTTY_BG_BLUR=0`, the image is added as is and shown whole (`background-image-fit = contain`).
 
-**Glossary** — every name is `bg` (background) plus one letter for the action: `bgs` **s**elect, `bgn` **n**ext, `bgp` **p**revious, `bgr` **r**andom, `bgh` **h**ide, `bgd` **d**elete, `bgw` **w**here, `bgm` **m**enu, `bgx` mi**x** (slideshow), `bgf` e**f**fects, `bg+` / `bg-` more / less opacity. Forgot one? `bgm` shows them all.
+**Glossary** — every name is `bg` (background) plus one letter for the action: `bgs` **s**elect, `bgn` **n**ext, `bgp` **p**revious, `bgr` **r**andom, `bgh` **h**ide, `bgd` **d**elete, `bgw` **w**here, `bgm` **m**enu, `bgx` mi**x** (slideshow), `bgf` e**f**fects, `bgv` **v**iew, `bg+` / `bg-` more / less opacity. Forgot one? `bgm` shows them all.
 
 **Language:** messages are in Chinese when `LANG` starts with `zh`, English otherwise. Override with `export GHOSTTY_BG_LANG=en` (or `zh`).
 
 **How it works:** `ghostty-bg` rewrites only the one-line `background.ghostty` file, then sends `SIGUSR2` to Ghostty, which reloads its config.
 
-**Uninstall:** `rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-,bgw,bgd,bgh,bgm,bgx,bgf}` and `rm -r ~/.local/share/ghostty-bg`, then remove the `# --- ghostty-bg ---` block from your Ghostty config.
+**Uninstall:** `rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-,bgw,bgd,bgh,bgm,bgx,bgf,bgv}` and `rm -r ~/.local/share/ghostty-bg`, then remove the `# --- ghostty-bg ---` block from your Ghostty config.
 
 ## License
 

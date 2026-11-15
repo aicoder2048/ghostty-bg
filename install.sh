@@ -30,8 +30,8 @@ SAMPLES=(sunset-sea.jpg atoll-aerial.jpg savanna.jpg)
 FX=(snow.glsl rain.glsl stars.glsl bubbles.glsl petals.glsl aurora.glsl meteors.glsl fireflies.glsl birds.glsl fish.glsl butterflies.glsl jellyfish.glsl)
 FX_DIR="${GHOSTTY_BG_SHARE:-$HOME/.local/share/ghostty-bg}/fx"
 BIN_DIR="${GHOSTTY_BG_BIN:-$HOME/.local/bin}"
-# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd / bgh / bgm / bgx / bgf are one-line shortcuts.
-FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw bgd bgh bgm bgx bgf)
+# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd / bgh / bgm / bgx / bgf / bgv are one-line shortcuts.
+FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw bgd bgh bgm bgx bgf bgv)
 
 mkdir -p "$BIN_DIR"
 
@@ -60,6 +60,15 @@ for f in "${FX[@]}"; do
   fi
 done
 msg "Installed: ${#FX[@]} effects in $FX_DIR" "已安装：${#FX[@]} 个特效，在 $FX_DIR"
+
+# The motion shader for the viewing mode (bgv).
+MOTION_DIR="$(dirname "$FX_DIR")/motion"
+mkdir -p "$MOTION_DIR"
+if [[ -n "$SRC_DIR" ]]; then
+  cp "$SRC_DIR/motion/kenburns.glsl" "$MOTION_DIR/kenburns.glsl"
+else
+  curl -fsSL "$REPO_RAW/motion/kenburns.glsl" -o "$MOTION_DIR/kenburns.glsl"
+fi
 
 # bgs is a short name for ghostty-bg. A symlink keeps both names on the same file
 # (it is created here rather than stored in the repo, so curl installs work too).

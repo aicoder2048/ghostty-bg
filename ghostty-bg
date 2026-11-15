@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="1.11.0"
+VERSION="1.12.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -124,6 +124,13 @@ current_image() {
 # Opacity set by ghostty-bg (in background.ghostty); empty if not set there.
 managed_opacity() {
   [[ -f "$BG_CONF" ]] || return 0
+  # The viewing mode (bgv) shows the image at full opacity and notes the real
+  # setting in a comment. If bgv was killed before it could restore the file,
+  # that comment is what counts, so the next command puts things right.
+  if grep -q '^# view-mode$' "$BG_CONF"; then
+    sed -n 's/^# view-opacity = \([0-9.]*\)$/\1/p' "$BG_CONF"
+    return
+  fi
   sed -n 's/^background-image-opacity = \([0-9.]*\)$/\1/p' "$BG_CONF"
 }
 
@@ -195,7 +202,8 @@ FX_DIR="${GHOSTTY_BG_SHARE:-$HOME/.local/share/ghostty-bg}/fx"
 # The effect shader ghostty-bg has switched on (path), or empty.
 managed_fx() {
   [[ -f "$BG_CONF" ]] || return 0
-  sed -n 's/^custom-shader = "\(.*\)"$/\1/p' "$BG_CONF"
+  # Skip the viewing mode's own motion shader (see managed_opacity).
+  sed -n 's/^custom-shader = "\(.*\)"$/\1/p' "$BG_CONF" | grep -v '/motion/' | head -1 || true
 }
 
 fx_name() { basename "${1%.glsl}"; }
@@ -563,6 +571,123 @@ cmd_step() {
   set_image "${images[$idx]}"
 }
 
+# ---------- viewing mode ----------
+
+# Motion shaders move every pixel, so they are only used when no text is on screen.
+MOTION_DIR="${GHOSTTY_BG_SHARE:-$HOME/.local/share/ghostty-bg}/motion"
+
+# Print the image before/after $2 in the library (wrapping), or a random other one.
+neighbor_image() {
+  local direction="$1" cur="$2" images=() line idx=0 i n
+  while IFS= read -r line; do images+=("$line"); done < <(list_images)
+  n=${#images[@]}
+  for i in "${!images[@]}"; do
+    if [[ "${images[$i]}" == "$cur" ]]; then idx=$i; fi
+  done
+  case "$direction" in
+    next)   idx=$(( (idx + 1) % n )) ;;
+    prev)   idx=$(( (idx - 1 + n) % n )) ;;
+    random) i=$(( RANDOM % n ))
+            if (( n > 1 && i == idx )); then i=$(( (i + 1) % n )); fi
+            idx=$i ;;
+  esac
+  echo "${images[$idx]}"
+}
+
+# bgv / bgs view: nothing but the picture. The terminal switches to its blank
+# alternate screen, the image goes to full opacity and a motion shader makes it
+# drift like a slow camera move. n / p / r change the image; any other key ends
+# it and everything is put back as it was.
+cmd_view() {
+  require_init
+  [[ -t 0 && -t 1 ]] ||
+    die "the viewing mode needs a terminal." "欣赏模式要在终端里运行。"
+  local motion="$MOTION_DIR/kenburns.glsl"
+  [[ -f "$motion" ]] ||
+    die "the motion shader is missing ($motion) — run the installer again." \
+        "缺少画面运动的特效文件（${motion}）——请重新运行一次安装命令。"
+
+  # Globals, not locals: the exit trap may run after this function has returned.
+  local img key rest
+  img="$(current_image)"
+  [[ -n "$img" && -f "$img" ]] || img="$(hidden_image)"
+  [[ -n "$img" && -f "$img" ]] || img="$(list_images | head -1)"
+  [[ -n "$img" ]] || empty_library
+  VIEW_START="$img"
+  VIEW_FX="$(managed_fx)"
+  VIEW_OPACITY="$(managed_opacity)"
+
+  # Keep an exact copy of the managed file and put it back when we leave,
+  # however we leave (key press, Ctrl+C, closed tab).
+  VIEW_SAVED="$(mktemp)"
+  VIEW_IMG="$img"
+  cp "$BG_CONF" "$VIEW_SAVED"
+  leave_view() {
+    trap - INT TERM HUP EXIT
+    if [[ "$VIEW_IMG" == "$VIEW_START" ]]; then
+      cp "$VIEW_SAVED" "$BG_CONF"                 # nothing changed: exact restore
+    else
+      FX_NEXT="$VIEW_FX"                          # keep the image you stopped on
+      write_include "$VIEW_IMG" "$VIEW_OPACITY"
+    fi
+    rm -f "$VIEW_SAVED"
+    reload_ghostty
+    printf '\033[?25h\033[?1049l'        # show the cursor, leave the alternate screen
+  }
+  trap 'leave_view; exit 0' INT TERM HUP
+  trap 'leave_view' EXIT
+
+  view_image() {
+    {
+      echo '# Managed by ghostty-bg — do not edit by hand. Run `bgs help` for commands.'
+      echo '# view-mode'
+      printf '# view-opacity = %s\n' "$VIEW_OPACITY"
+      printf 'background-image = "%s"\n' "$1"
+      if is_narrow "$1"; then echo 'background-image-fit = contain'; fi
+      echo 'background-image-opacity = 1'
+      printf 'custom-shader = "%s"\n' "$motion"
+      [[ -n "$VIEW_FX" ]] && printf 'custom-shader = "%s"\n' "$VIEW_FX"
+      true
+    } > "$BG_CONF"
+    VIEW_IMG="$1"
+    reload_ghostty
+  }
+
+  printf '\033[?1049h\033[2J\033[H\033[?25l'   # alternate screen, clear, hide the cursor
+  view_image "$img"
+
+  # A short hint, then a clean screen.
+  printf '\033[2m  %s\033[0m' "$(msg 'n next · p previous · r random · any other key leaves' \
+                                     'n 下一张 · p 上一张 · r 随机 · 其他任意键退出')"
+  if IFS= read -r -s -n 1 -t 3 key </dev/tty; then :; else key="__none__"; fi
+  printf '\r\033[K'
+
+  while true; do
+    if [[ "$key" == "__none__" ]]; then
+      IFS= read -r -s -n 1 key </dev/tty || break
+    fi
+    if [[ "$key" == $'\033' ]]; then
+      # Arrow keys arrive as ESC [ C etc.; a lone Esc has nothing after it.
+      rest=""
+      IFS= read -r -s -n 2 -t 1 rest </dev/tty || true
+      case "$rest" in
+        '[C'|'[B') key=n ;;
+        '[D'|'[A') key=p ;;
+        *)         break ;;
+      esac
+    fi
+    case "$key" in
+      n|N|' ') img="$(neighbor_image next "$img")" ;;
+      p|P)     img="$(neighbor_image prev "$img")" ;;
+      r|R)     img="$(neighbor_image random "$img")" ;;
+      *)       break ;;
+    esac
+    view_image "$img"
+    key="__none__"
+  done
+  leave_view
+}
+
 # Turn "5", "5s", "2m" or "1h" into whole seconds; prints nothing if it is not valid.
 parse_interval() {
   local v="$1" n unit
@@ -838,6 +963,7 @@ cmd_menu() {
     cat <<'EOF'
   换图   bgn  下一张      bgp  上一张      bgr  随机一张
          bgs  挑一张（fzf 预览）       bgx  轮播，按任意键停
+         bgv  欣赏模式：清屏只看图，画面慢慢动
   外观   bg+  浓一点      bg-  淡一点      bgh  隐藏 / 显示
          bgf  特效 12 种（bgf 列出，bgf next 换一个，bgf off 关）
   图库   bgs add <图或文件夹>   加图        bgd  删掉当前这张
@@ -847,12 +973,13 @@ cmd_menu() {
   速记：bg = background，再加一个字母
         n next · p previous · r random · s select
         h hide · d delete · w where · m menu · x mix · f effects
-        + 浓 · - 淡
+        v view · + 浓 · - 淡
 EOF
   else
     cat <<'EOF'
   switch   bgn  next        bgp  previous    bgr  random
            bgs  pick one (fzf preview)   bgx  slideshow, any key stops
+           bgv  viewing mode: just the picture, slowly moving
   look     bg+  stronger    bg-  fainter     bgh  hide / show
            bgf  12 effects (bgf lists, bgf next steps, bgf off stops)
   library  bgs add <image or folder>  add   bgd  delete current
@@ -862,7 +989,7 @@ EOF
   memo: bg = background, plus one letter
         n next · p previous · r random · s select
         h hide · d delete · w where · m menu · x mix · f effects
-        + stronger · - fainter
+        v view · + stronger · - fainter
 EOF
   fi
 }
@@ -891,6 +1018,7 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgs               用 fzf 挑一张（装了 chafa 会显示预览）
   bgs next | prev   下一张 / 上一张
   bgs random        随机一张
+  bgs view          欣赏模式：切到空白屏幕只看图，画面像镜头一样慢慢推移；n / p / r 换图，其他键退出并恢复原样
   bgs play [间隔]   轮播：在前台每隔几秒随机换一张，按任意键停（默认 5 秒；可写 30s、5m）
   bgs list          列出图库，* 是当前这张
   bgs off | on      隐藏 / 恢复背景图（bgh 在两者之间切换）
@@ -899,7 +1027,7 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgs opacity       查看背景图浓度；bgs opacity 0.3 设成 0.3；+ / - 每次加减 0.05
   bgs where         显示用到的配置文件和图库位置（= bgw）
 
-快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgh = 隐藏/显示，bgw = 文件在哪，bgd = 删掉当前这张，bgm = 命令菜单，bgx = 轮播，bgf = 特效
+快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgh = 隐藏/显示，bgw = 文件在哪，bgd = 删掉当前这张，bgm = 命令菜单，bgx = 轮播，bgf = 特效，bgv = 欣赏模式
 
 缩写怎么来的：bg = background（背景），后面一个字母是动作
   bgs  s = select    挑图          bgn  n = next      下一张
@@ -907,6 +1035,7 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgh  h = hide      隐藏/显示     bgd  d = delete    删掉当前这张
   bgw  w = where     文件在哪      bgm  m = menu      命令菜单
   bgx  x = mix       轮播（混着放）    bgf  f = effects   动态特效
+  bgv  v = view      欣赏模式
   bg+  + = more      浓一点        bg-  - = less      淡一点
 
 语言：GHOSTTY_BG_LANG=zh 或 en（默认跟随 LANG）
@@ -923,6 +1052,7 @@ Usage (bgs and ghostty-bg are the same command):
   bgs               pick an image with fzf (preview via chafa, if installed)
   bgs next | prev   switch to the next / previous image
   bgs random        switch to a random image
+  bgs view          viewing mode: a blank screen with just the picture, drifting like a slow camera; n / p / r change it, any other key leaves and restores everything
   bgs play [time]   slideshow in the foreground: a random image every few seconds, any key stops (default 5s; 30s, 5m)
   bgs list          list the library, * marks the current image
   bgs off | on      hide / bring back the background image (bgh toggles)
@@ -931,7 +1061,7 @@ Usage (bgs and ghostty-bg are the same command):
   bgs opacity       show the image opacity; bgs opacity 0.3 sets it; + / - step by 0.05
   bgs where         show which files ghostty-bg uses (= bgw)
 
-Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgh = hide/show, bgw = where, bgd = delete the current image, bgm = command menu, bgx = slideshow, bgf = effects
+Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgh = hide/show, bgw = where, bgd = delete the current image, bgm = command menu, bgx = slideshow, bgf = effects, bgv = viewing mode
 
 Where the names come from: bg = background, plus one letter for the action
   bgs  s = select    pick one      bgn  n = next      next image
@@ -939,6 +1069,7 @@ Where the names come from: bg = background, plus one letter for the action
   bgh  h = hide      hide / show   bgd  d = delete    delete current
   bgw  w = where     file places   bgm  m = menu      command menu
   bgx  x = mix       slideshow     bgf  f = effects   animated effect
+  bgv  v = view      viewing mode
   bg+  + = more      stronger      bg-  - = less      fainter
 
 Language: GHOSTTY_BG_LANG=zh or en (default: follows LANG)
@@ -965,6 +1096,7 @@ main() {
     add)               shift; cmd_add "$@" ;;
     next|prev|random)  cmd_step "$1" ;;
     play|slideshow)    shift; cmd_play "${1:-}" ;;
+    view)              cmd_view ;;
     list|ls)           cmd_list ;;
     off|hide)          cmd_off ;;
     on|show)           cmd_on ;;

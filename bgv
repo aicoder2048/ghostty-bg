@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# bgv — shortcut for `ghostty-bg view`: nothing but the picture, slowly moving; any key leaves.
+exec ghostty-bg view "$@"
