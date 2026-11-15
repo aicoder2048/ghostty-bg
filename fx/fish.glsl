@@ -36,7 +36,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec4 base = texture(iChannel0, uv);
 
     float aspect = iResolution.x / iResolution.y;
-    vec2 p = vec2(uv.x * aspect, uv.y);
+    // Ghostty's fragCoord has y pointing DOWN (0 at the top). The scene below is
+    // easier to think about with y pointing up, so flip it once here.
+    vec2 p = vec2(uv.x * aspect, 1.0 - uv.y);
     float travel = aspect + 0.6;
 
     vec3 rgb = base.rgb;

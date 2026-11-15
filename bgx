@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-# bgx — shortcut for `ghostty-bg play`: a slideshow in this terminal; any key stops it.
-exec ghostty-bg play "$@"

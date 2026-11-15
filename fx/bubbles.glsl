@@ -15,7 +15,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord.xy / iResolution.xy;
     vec4 base = texture(iChannel0, uv);
 
-    vec2 p0 = vec2(uv.x * iResolution.x / iResolution.y, uv.y);
+    // Ghostty's fragCoord has y pointing DOWN (0 at the top). The scene below is
+    // easier to think about with y pointing up, so flip it once here.
+    vec2 p0 = vec2(uv.x * iResolution.x / iResolution.y, 1.0 - uv.y);
 
     float light = 0.0;
     for (int i = 0; i < LAYERS; i++) {
@@ -25,7 +27,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
         vec2 p = p0;
         p.x += sin(iTime * 0.6 + fi * 2.1 + p.y * 7.0) * 0.012;   // wobble
-        p.y -= iTime * speed + fi * 0.41;                          // +Y is up: rise
+        p.y -= iTime * speed + fi * 0.41;                          // y is up here: rise
 
         vec2 g = p * scale;
         vec2 id = floor(g);

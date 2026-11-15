@@ -11,6 +11,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord.xy / iResolution.xy;
     vec4 base = texture(iChannel0, uv);
 
+    // Ghostty's fragCoord has y pointing DOWN (0 at the top). The scene below is
+    // easier to think about with y pointing up, so flip it once here.
+    float y = 1.0 - uv.y;
     float x = uv.x * iResolution.x / iResolution.y;
     vec3 glow = vec3(0.0);
 
@@ -23,7 +26,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float width = 0.055 + 0.02 * sin(x * 2.3 + iTime * 0.09 + fi * 1.7);
 
         // Soft below the band, a longer tail upward — like a hanging curtain.
-        float dy = uv.y - center;
+        float dy = y - center;
         float band = dy < 0.0 ? exp(-dy * dy / (width * width * 0.35))
                               : exp(-dy * dy / (width * width * 3.0));
 

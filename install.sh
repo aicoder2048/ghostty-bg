@@ -27,11 +27,14 @@ fi
 REPO_RAW="${GHOSTTY_BG_REPO_RAW:-https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main}"
 SAMPLES=(sunset-sea.jpg atoll-aerial.jpg savanna.jpg)
 # Animated effects (GLSL shaders) for `bgf`; ghostty-bg looks for them here.
-FX=(snow.glsl rain.glsl stars.glsl bubbles.glsl petals.glsl aurora.glsl meteors.glsl fireflies.glsl birds.glsl fish.glsl butterflies.glsl jellyfish.glsl)
+FX=(snow.glsl leaves.glsl ripples.glsl bubbles.glsl petals.glsl aurora.glsl meteors.glsl fireflies.glsl birds.glsl fish.glsl butterflies.glsl jellyfish.glsl)
+# Renamed or replaced in earlier versions; removed on upgrade so nothing stale is left.
+OLD_FILES=(bgx)
+OLD_FX=(rain.glsl stars.glsl)
 FX_DIR="${GHOSTTY_BG_SHARE:-$HOME/.local/share/ghostty-bg}/fx"
 BIN_DIR="${GHOSTTY_BG_BIN:-$HOME/.local/bin}"
-# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd / bgh / bgm / bgx / bgf / bgv are one-line shortcuts.
-FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw bgd bgh bgm bgx bgf bgv)
+# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd / bgh / bgm / bga / bgf / bgv are one-line shortcuts.
+FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw bgd bgh bgm bga bgf bgv)
 
 mkdir -p "$BIN_DIR"
 
@@ -51,7 +54,9 @@ for f in "${FILES[@]}"; do
   msg "Installed: $BIN_DIR/$f" "已安装：$BIN_DIR/$f"
 done
 
+for f in "${OLD_FILES[@]}"; do rm -f "$BIN_DIR/$f"; done
 mkdir -p "$FX_DIR"
+for f in "${OLD_FX[@]}"; do rm -f "$FX_DIR/$f"; done
 for f in "${FX[@]}"; do
   if [[ -n "$SRC_DIR" ]]; then
     cp "$SRC_DIR/fx/$f" "$FX_DIR/$f"

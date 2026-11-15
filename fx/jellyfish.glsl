@@ -5,7 +5,7 @@
 // text underneath (light shapes on dark themes, dark shapes on light themes).
 
 const float INTENSITY = 0.50;   // overall strength (0 = off)
-const int   COUNT     = 5;      // number of jellyfish
+const int   COUNT     = 12;     // number of jellyfish (about two thirds are on screen at once)
 const int   TENTACLES = 5;
 
 float hash1(float n) {
@@ -46,7 +46,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec4 base = texture(iChannel0, uv);
 
     float aspect = iResolution.x / iResolution.y;
-    vec2 p = vec2(uv.x * aspect, uv.y);
+    // Ghostty's fragCoord has y pointing DOWN (0 at the top). The scene below is
+    // easier to think about with y pointing up, so flip it once here.
+    vec2 p = vec2(uv.x * aspect, 1.0 - uv.y);
 
     vec3 rgb = base.rgb;
     for (int i = 0; i < COUNT; i++) {
@@ -55,7 +57,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float b = hash1(fi * 78.233 + 2.0);
         float c = hash1(fi * 39.425 + 3.0);
 
-        float size = mix(0.045, 0.075, c);
+        float size = mix(0.035, 0.075, c);
         float phase = fi * 2.4;
         float pulse = sin(iTime * (1.3 + 0.5 * a) + phase);
 
