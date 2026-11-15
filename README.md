@@ -119,6 +119,6 @@ The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bg
 
 ## License
 
-Code: MIT. Sample images in `samples/` are AI-generated with FLUX — see [`samples/NOTICE.md`](samples/NOTICE.md).
+Code: MIT. The sample images in `samples/` (sunset over the sea, atoll aerial view, African savanna) are AI-generated with Black Forest Labs' FLUX models.
 
-代码：MIT。`samples/` 里的样图是用 FLUX AI 生成的，说明见 [`samples/NOTICE.md`](samples/NOTICE.md)。
+代码：MIT。`samples/` 里的三张样图（海上日落、环礁航拍、非洲草原）是用 Black Forest Labs 的 FLUX 模型 AI 生成的。
