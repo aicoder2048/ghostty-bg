@@ -93,10 +93,20 @@ cd ghostty-bg && ./install.sh
 
 忘了也没关系：敲 `bgm`，菜单最下面就有这张速记。
 
+### 竖图怎么显示
+
+终端窗口是横的，竖图（宽高比小于 1.2，方图也算）如果铺满窗口，会被上下裁掉一大半。所以：
+
+- **装了 [ImageMagick](https://imagemagick.org)**（`brew install imagemagick`）：`bgs add` 会把竖图做成 16:10 的横版存进图库——照片放中间，两边用同一张图放大、模糊、调暗后填满。你的原图不动。
+- **没装，或者设了 `GHOSTTY_BG_BLUR=0`**：原图照常加入，显示时自动改成完整显示（两边是终端底色），不会被裁。
+
+同一张竖图重复添加，会认出来并跳过。
+
 可选依赖：
 
 - [`fzf`](https://github.com/junegunn/fzf)：用来挑图，`brew install fzf`
 - [`chafa`](https://hpjansson.org/chafa/)：在 fzf 里预览图片，`brew install chafa`
+- [`ImageMagick`](https://imagemagick.org)：把竖图做成两边模糊的横版，`brew install imagemagick`
 
 提示语言：中文环境（`LANG` 以 `zh` 开头）自动显示中文，否则显示英文。也可以在 `~/.zshrc` 里指定：
 
@@ -136,6 +146,8 @@ bgs add ~/Pictures/some-photo.jpg
 The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` / `bgw` / `bgd` / `bgh` / `bgm` in `~/.local/bin`, then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; remove them any time with `bgs rm`.
 
 **Commands** (`bgs` = `ghostty-bg`): `bgs add <image|folder> [...]` (a folder adds every PNG/JPG in it; images already in the library are skipped), `bgs list`, `bgs off` / `bgs on`, `bgs rm <name>...` (moves library images to the Trash; no name = pick with fzf), `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random, `bg+` / `bg-` image opacity ±0.05 (or `bgs opacity 0.3`), `bgw` where the files are, `bgd` delete the current image, `bgh` hide / show the background, `bgm` menu of all commands.
+
+**Portrait images:** anything narrower than 1.2:1 would be cropped heavily in a wide terminal. With ImageMagick installed, `bgs add` stores a 16:10 version with the photo centered and blurred sides (your original is untouched); without it, or with `GHOSTTY_BG_BLUR=0`, the image is added as is and shown whole (`background-image-fit = contain`).
 
 **Glossary** — every name is `bg` (background) plus one letter for the action: `bgs` **s**elect, `bgn` **n**ext, `bgp` **p**revious, `bgr` **r**andom, `bgh` **h**ide, `bgd` **d**elete, `bgw` **w**here, `bgm` **m**enu, `bg+` / `bg-` more / less opacity. Forgot one? `bgm` shows them all.
 

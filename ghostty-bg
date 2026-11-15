@@ -11,10 +11,11 @@
 # Environment:
 #   GHOSTTY_BG_LANG     zh | en — message language (default: from LC_ALL / LC_MESSAGES / LANG)
 #   GHOSTTY_BG_CONFIG   path of the Ghostty config file to use (default: auto-detect)
+#   GHOSTTY_BG_BLUR     0 = do not widen narrow images with blurred sides (default: on if ImageMagick is installed)
 
 set -euo pipefail
 
-VERSION="1.7.2"
+VERSION="1.8.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -144,13 +145,35 @@ hidden_image() {
   sed -n 's/^# hidden-image = "\(.*\)"$/\1/p' "$BG_CONF"
 }
 
+# ---------- image shape ----------
+
+# Images narrower than this width/height ratio count as "narrow" (portrait or
+# square). Filling a wide window with them (fit = cover) would crop off most of
+# the picture, so they are shown whole instead (fit = contain).
+NARROW_RATIO="1.2"
+
+# Print width/height of an image (macOS sips, no extra tools needed).
+image_ratio() {
+  sips -g pixelWidth -g pixelHeight "$1" 2>/dev/null |
+    awk '/pixelWidth/ { w = $2 } /pixelHeight/ { h = $2 } END { if (h > 0) printf "%.4f", w / h }'
+}
+
+is_narrow() {
+  local r
+  r="$(image_ratio "$1")"
+  [[ -n "$r" ]] && awk -v r="$r" -v t="$NARROW_RATIO" 'BEGIN { exit !(r < t) }'
+}
+
 # Rewrite background.ghostty.
 # $1: image path ("" = no image), $2: opacity ("" = not set),
 # $3: image to remember while hidden ("" = none).
+# A narrow image also gets `background-image-fit = contain`, so it is shown
+# whole instead of cropped; wide images keep the fit from the main config.
 write_include() {
   {
     echo '# Managed by ghostty-bg — do not edit by hand. Run `bgs help` for commands.'
     [[ -n "$1" ]] && printf 'background-image = "%s"\n' "$1"
+    if [[ -n "$1" ]] && is_narrow "$1"; then echo 'background-image-fit = contain'; fi
     [[ -n "$2" ]] && printf 'background-image-opacity = %s\n' "$2"
     [[ -n "${3:-}" ]] && printf '# hidden-image = "%s"\n' "$3"
     true
@@ -231,21 +254,51 @@ ADD_COUNT=0      # images copied
 SKIP_COUNT=0     # images skipped (already in the library, or not PNG/JPG)
 DUP_FOUND=""     # library copy of the last already-present image
 
-add_one() {
-  local src="$1" dup name dest n=1
-  dup="$(find_duplicate "$src")"
-  if [[ -n "$dup" ]]; then
-    msg "  already in library: $(basename "$dup")" "  图库里已有：$(basename "$dup")"
-    DUP_FOUND="$dup"
-    SKIP_COUNT=$((SKIP_COUNT + 1))
-    return
-  fi
-  name="$(basename "$src")"
+# ---------- widening narrow images (needs ImageMagick) ----------
+
+# Narrow images are stored as a 16:10 version: the photo in the middle, the sides
+# filled with a blurred, darkened, enlarged copy of itself. Only when ImageMagick
+# 7 (`magick`) is installed and GHOSTTY_BG_BLUR is not 0; otherwise the photo is
+# copied as is and simply shown whole (see write_include).
+blur_enabled() {
+  [[ "${GHOSTTY_BG_BLUR:-1}" != 0 ]] && command -v magick >/dev/null
+}
+
+# $1: source image, $2: destination .jpg
+make_wide() {
+  local src="$1" dest="$2" h w
+  # Height after applying the EXIF rotation (phone photos), capped at 2160 px.
+  h="$(magick "$src" -auto-orient -format '%h' info: 2>/dev/null)" || return 1
+  [[ "$h" =~ ^[0-9]+$ ]] || return 1
+  (( h > 2160 )) && h=2160
+  w=$(( h * 16 / 10 ))
+  magick "$src" -auto-orient -resize "x$h" \
+    \( +clone -resize "${w}x${h}^" -gravity center -extent "${w}x${h}" -blur 0x40 -modulate 70 \) \
+    +swap -gravity center -composite -strip -quality 90 "$dest" 2>/dev/null
+}
+
+# The widened copy differs from the original, so content comparison cannot spot
+# a re-added original. backgrounds/.sources maps "sha1<TAB>library file name".
+SOURCES_INDEX_NAME=".sources"
+
+source_sha() { shasum -a 1 "$1" | cut -d' ' -f1; }
+
+# Print the library file made from a source with this sha1, if it still exists.
+find_widened() {
+  local sha="$1" index="$LIB_DIR/$SOURCES_INDEX_NAME" name
+  [[ -f "$index" ]] || return 0
+  while IFS=$'\t' read -r s name; do
+    if [[ "$s" == "$sha" && -f "$LIB_DIR/$name" ]]; then echo "$LIB_DIR/$name"; return; fi
+  done < "$index"
+}
+
+# Print a free library path for this file name (timestamp prefix if taken).
+free_library_path() {
+  local name="$1" dest n=1 stamp
   dest="$LIB_DIR/$name"
   # Same name but different content: keep both, the new one gets a timestamp prefix
   # (plus a counter if that name is taken too, e.g. several in the same second).
   if [[ -e "$dest" ]]; then
-    local stamp
     stamp="$(date +%Y%m%d_%H%M%S)"
     dest="$LIB_DIR/$stamp-$name"
     while [[ -e "$dest" ]]; do
@@ -253,10 +306,49 @@ add_one() {
       dest="$LIB_DIR/$stamp-$n-$name"
     done
   fi
-  cp "$src" "$dest"
-  msg "  added: $(basename "$dest")" "  已加入：$(basename "$dest")"
-  [[ -n "$ADD_FIRST" ]] || ADD_FIRST="$dest"
+  echo "$dest"
+}
+
+added() {   # $1: library path, $2: optional note
+  msg "  added: $(basename "$1")${2:+  ($2)}" "  已加入：$(basename "$1")${3:+（$3）}"
+  [[ -n "$ADD_FIRST" ]] || ADD_FIRST="$1"
   ADD_COUNT=$((ADD_COUNT + 1))
+}
+
+add_one() {
+  local src="$1" dup sha base dest
+  dup="$(find_duplicate "$src")"
+  if [[ -z "$dup" ]] && blur_enabled && is_narrow "$src"; then
+    sha="$(source_sha "$src")"
+    dup="$(find_widened "$sha")"
+  fi
+  if [[ -n "$dup" ]]; then
+    msg "  already in library: $(basename "$dup")" "  图库里已有：$(basename "$dup")"
+    DUP_FOUND="$dup"
+    SKIP_COUNT=$((SKIP_COUNT + 1))
+    return
+  fi
+
+  if blur_enabled && is_narrow "$src"; then
+    base="$(basename "$src")"
+    dest="$(free_library_path "${base%.*}-wide.jpg")"
+    if make_wide "$src" "$dest"; then
+      printf '%s\t%s\n' "${sha:-$(source_sha "$src")}" "$(basename "$dest")" >> "$LIB_DIR/$SOURCES_INDEX_NAME"
+      added "$dest" "narrow image, widened with blurred sides" "竖图，已做成两边模糊的横版"
+      return
+    fi
+    rm -f "$dest"
+    msg "  (could not widen $base with ImageMagick; adding it as is)" \
+        "  （ImageMagick 处理 $base 失败，按原图加入）"
+  fi
+
+  dest="$(free_library_path "$(basename "$src")")"
+  cp "$src" "$dest"
+  if is_narrow "$dest"; then
+    added "$dest" "narrow image, shown whole" "竖图，会完整显示"
+  else
+    added "$dest"
+  fi
 }
 
 # bgs add <image|folder> [more images or folders...]
@@ -586,6 +678,7 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
 用法（下面的 bgs 都可以写成 ghostty-bg）：
   bgs init          首次设置：接入你的 Ghostty 配置，建好图库目录
   bgs add <图片或文件夹>  复制进图库并设为背景（文件夹会加入里面所有 PNG/JPG）
+                    竖图：装了 ImageMagick 会做成两边模糊的横版，否则完整显示
   bgs               用 fzf 挑一张（装了 chafa 会显示预览）
   bgs next | prev   下一张 / 上一张
   bgs random        随机一张
@@ -605,6 +698,7 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bg+  + = more      浓一点        bg-  - = less      淡一点
 
 语言：GHOSTTY_BG_LANG=zh 或 en（默认跟随 LANG）
+竖图不做模糊：GHOSTTY_BG_BLUR=0
 EOF
   else
     cat <<'EOF'
@@ -613,6 +707,7 @@ ghostty-bg (short: bgs) — switch the Ghostty terminal background image with on
 Usage (bgs and ghostty-bg are the same command):
   bgs init          one-time setup: hook into your Ghostty config, create the image folder
   bgs add <image or folder>  copy into the library and use it (a folder adds every PNG/JPG in it)
+                    narrow images: widened with blurred sides if ImageMagick is installed, else shown whole
   bgs               pick an image with fzf (preview via chafa, if installed)
   bgs next | prev   switch to the next / previous image
   bgs random        switch to a random image
@@ -632,6 +727,7 @@ Where the names come from: bg = background, plus one letter for the action
   bg+  + = more      stronger      bg-  - = less      fainter
 
 Language: GHOSTTY_BG_LANG=zh or en (default: follows LANG)
+No blurred sides for narrow images: GHOSTTY_BG_BLUR=0
 EOF
   fi
 }
