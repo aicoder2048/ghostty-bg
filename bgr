@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# bgr — shortcut for `ghostty-bg random`: switch Ghostty to a random background image.
+exec ghostty-bg random "$@"

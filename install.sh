@@ -25,7 +25,8 @@ fi
 
 REPO_RAW="https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main"
 BIN_DIR="${GHOSTTY_BG_BIN:-$HOME/.local/bin}"
-FILES=(ghostty-bg bgn)
+# ghostty-bg is the main command; bgn / bgp / bgr are one-line shortcuts.
+FILES=(ghostty-bg bgn bgp bgr)
 
 mkdir -p "$BIN_DIR"
 
@@ -44,6 +45,11 @@ for f in "${FILES[@]}"; do
   chmod +x "$BIN_DIR/$f"
   msg "Installed: $BIN_DIR/$f" "已安装：$BIN_DIR/$f"
 done
+
+# bgs is a short name for ghostty-bg. A symlink keeps both names on the same file
+# (it is created here rather than stored in the repo, so curl installs work too).
+ln -sf ghostty-bg "$BIN_DIR/bgs"
+msg "Installed: $BIN_DIR/bgs -> ghostty-bg" "已安装：$BIN_DIR/bgs -> ghostty-bg"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*)

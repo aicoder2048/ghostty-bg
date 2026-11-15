@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# bgp — shortcut for `ghostty-bg prev`: switch Ghostty to the previous background image.
+exec ghostty-bg prev "$@"

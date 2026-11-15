@@ -5,9 +5,13 @@
 Switch the background image of the [Ghostty](https://ghostty.org) terminal with one command — it takes effect immediately, no manual config reload. **macOS only.**
 
 ```bash
-bgn                 # 换下一张 / next image
-ghostty-bg          # 用 fzf 挑一张（带预览）/ pick one with fzf (with preview)
+bgn                 # 下一张 / next image
+bgp                 # 上一张 / previous image
+bgr                 # 随机一张 / random image
+bgs                 # 用 fzf 挑一张（带预览）/ pick one with fzf (with preview)
 ```
+
+`bgs` 是 `ghostty-bg` 的简写，两个名字是同一个命令。/ `bgs` is short for `ghostty-bg` — same command.
 
 ---
 
@@ -21,14 +25,14 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 
 安装脚本会做三件事：
 
-1. 把 `ghostty-bg` 和 `bgn` 两个命令放到 `~/.local/bin`。
+1. 把 `ghostty-bg`（简写 `bgs`）和快捷命令 `bgn`、`bgp`、`bgr` 放到 `~/.local/bin`。
 2. 运行 `ghostty-bg init`：先**备份**你的 Ghostty 配置，再在末尾加上一行 `config-file = ?background.ghostty`（外加默认透明度 0.2、铺满窗口；你已经设过的不会重复添加）。
 3. 建好图库目录 `backgrounds/`，就在你的 Ghostty 配置文件旁边。
 
 然后加第一张图：
 
 ```bash
-ghostty-bg add ~/Pictures/some-photo.jpg
+bgs add ~/Pictures/some-photo.jpg
 ```
 
 > 如果提示 `~/.local/bin` 不在 PATH 里，按提示把那行 `export PATH=...` 加进 `~/.zshrc`，再开一个新终端。
@@ -42,17 +46,20 @@ cd ghostty-bg && ./install.sh
 
 ## 用法
 
+下表里的 `bgs` 都可以写成全名 `ghostty-bg`。
+
 | 命令 | 作用 |
 |---|---|
-| `ghostty-bg add <图片>` | 把图片复制进图库并设为背景（PNG / JPG） |
-| `bgn` | 下一张（等于 `ghostty-bg next`） |
-| `ghostty-bg next` / `prev` | 下一张 / 上一张 |
-| `ghostty-bg random` | 随机一张 |
-| `ghostty-bg` | 用 fzf 挑一张，右侧预览图片 |
-| `ghostty-bg list` | 列出图库，`*` 是当前这张 |
-| `ghostty-bg off` | 关掉背景图 |
-| `ghostty-bg where` | 显示用到的配置文件和图库位置 |
-| `ghostty-bg init` | 首次设置（安装脚本已自动运行，重复运行也没关系） |
+| `bgs add <图片>` | 把图片复制进图库并设为背景（PNG / JPG） |
+| `bgn` | 下一张（= `bgs next`） |
+| `bgp` | 上一张（= `bgs prev`） |
+| `bgr` | 随机一张（= `bgs random`） |
+| `bgs` | 用 fzf 挑一张，右侧预览图片 |
+| `bgs list` | 列出图库，`*` 是当前这张 |
+| `bgs off` | 关掉背景图 |
+| `bgs where` | 显示用到的配置文件和图库位置 |
+| `bgs init` | 首次设置（安装脚本已自动运行，重复运行也没关系） |
+| `bgs help` | 查看帮助 |
 
 可选依赖：
 
@@ -76,7 +83,7 @@ export GHOSTTY_BG_LANG=zh   # 或 en
 ## 卸载
 
 ```bash
-rm ~/.local/bin/ghostty-bg ~/.local/bin/bgn
+rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr}
 ```
 
 再从 Ghostty 配置里删掉 `# --- ghostty-bg ---` 下面那几行；图库目录 `backgrounds/` 和 `background.ghostty` 按需删除（`ghostty-bg where` 可以看到它们在哪）。
@@ -89,18 +96,18 @@ rm ~/.local/bin/ghostty-bg ~/.local/bin/bgn
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install.sh | bash
-ghostty-bg add ~/Pictures/some-photo.jpg
+bgs add ~/Pictures/some-photo.jpg
 ```
 
-The installer puts `ghostty-bg` and `bgn` in `~/.local/bin`, then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them).
+The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` in `~/.local/bin`, then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them).
 
-**Commands:** `add <image>`, `next` (or just `bgn`), `prev`, `random`, `list`, `off`, `where`, `init`, and no arguments to pick with fzf (preview via chafa if installed).
+**Commands** (`bgs` = `ghostty-bg`): `bgs add <image>`, `bgs list`, `bgs off`, `bgs where`, `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random.
 
 **Language:** messages are in Chinese when `LANG` starts with `zh`, English otherwise. Override with `export GHOSTTY_BG_LANG=en` (or `zh`).
 
 **How it works:** `ghostty-bg` rewrites only the one-line `background.ghostty` file, then sends `SIGUSR2` to Ghostty, which reloads its config.
 
-**Uninstall:** remove the two commands from `~/.local/bin` and the `# --- ghostty-bg ---` block from your Ghostty config.
+**Uninstall:** `rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr}`, then remove the `# --- ghostty-bg ---` block from your Ghostty config.
 
 ## License
 

@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -139,8 +139,8 @@ set_image() {
 }
 
 empty_library() {
-  die "the library is empty — add one with: ghostty-bg add <image>" \
-      "图库是空的——先加一张：ghostty-bg add <图片>"
+  die "the library is empty — add one with: bgs add <image>" \
+      "图库是空的——先加一张：bgs add <图片>"
 }
 
 # ---------- commands ----------
@@ -175,7 +175,7 @@ cmd_init() {
     msg "Tip: install fzf to pick images interactively (brew install fzf)." \
         "提示：装上 fzf 就能交互式挑图（brew install fzf）。"
   echo ""
-  msg "Next: ghostty-bg add ~/Pictures/some-photo.jpg" "下一步：ghostty-bg add ~/Pictures/某张照片.jpg"
+  msg "Next: bgs add ~/Pictures/some-photo.jpg   (bgs = ghostty-bg)" "下一步：bgs add ~/Pictures/某张照片.jpg   （bgs 就是 ghostty-bg）"
 }
 
 cmd_add() {
@@ -272,33 +272,37 @@ cmd_where() {
 usage() {
   if [[ "$UI_LANG" == zh ]]; then
     cat <<'EOF'
-ghostty-bg —— 一条命令切换 Ghostty 终端背景图（macOS）
+ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（macOS）
 
-用法：
-  ghostty-bg init          首次设置：接入你的 Ghostty 配置，建好图库目录
-  ghostty-bg add <图片>    把图片（PNG/JPG）复制进图库并设为背景
-  ghostty-bg               用 fzf 挑一张（装了 chafa 会显示预览）
-  ghostty-bg next | prev   下一张 / 上一张（bgn 等于 ghostty-bg next）
-  ghostty-bg random        随机一张
-  ghostty-bg list          列出图库，* 是当前这张
-  ghostty-bg off           关掉背景图
-  ghostty-bg where         显示用到的配置文件和图库位置
+用法（下面的 bgs 都可以写成 ghostty-bg）：
+  bgs init          首次设置：接入你的 Ghostty 配置，建好图库目录
+  bgs add <图片>    把图片（PNG/JPG）复制进图库并设为背景
+  bgs               用 fzf 挑一张（装了 chafa 会显示预览）
+  bgs next | prev   下一张 / 上一张
+  bgs random        随机一张
+  bgs list          列出图库，* 是当前这张
+  bgs off           关掉背景图
+  bgs where         显示用到的配置文件和图库位置
+
+快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张
 
 语言：GHOSTTY_BG_LANG=zh 或 en（默认跟随 LANG）
 EOF
   else
     cat <<'EOF'
-ghostty-bg — switch the Ghostty terminal background image with one command (macOS)
+ghostty-bg (short: bgs) — switch the Ghostty terminal background image with one command (macOS)
 
-Usage:
-  ghostty-bg init          one-time setup: hook into your Ghostty config, create the image folder
-  ghostty-bg add <image>   copy an image (PNG/JPG) into the library and use it
-  ghostty-bg               pick an image with fzf (preview via chafa, if installed)
-  ghostty-bg next | prev   switch to the next / previous image (bgn = ghostty-bg next)
-  ghostty-bg random        switch to a random image
-  ghostty-bg list          list the library, * marks the current image
-  ghostty-bg off           turn the background image off
-  ghostty-bg where         show which files ghostty-bg uses
+Usage (bgs and ghostty-bg are the same command):
+  bgs init          one-time setup: hook into your Ghostty config, create the image folder
+  bgs add <image>   copy an image (PNG/JPG) into the library and use it
+  bgs               pick an image with fzf (preview via chafa, if installed)
+  bgs next | prev   switch to the next / previous image
+  bgs random        switch to a random image
+  bgs list          list the library, * marks the current image
+  bgs off           turn the background image off
+  bgs where         show which files ghostty-bg uses
+
+Shortcuts: bgn = next, bgp = previous, bgr = random
 
 Language: GHOSTTY_BG_LANG=zh or en (default: follows LANG)
 EOF
