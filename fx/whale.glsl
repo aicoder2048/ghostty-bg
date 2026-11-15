@@ -4,10 +4,10 @@
 // Part of ghostty-bg. It only draws on top and never moves or distorts the
 // text underneath (light shapes on dark themes, dark shapes on light themes).
 
-const float INTENSITY = 0.32;   // overall strength (0 = off); kept low because the whale is big
+const float INTENSITY = 0.40;   // overall strength (0 = off); kept moderate because the whale is huge
 const float PERIOD    = 42.0;   // seconds from the start of one crossing to the next
 const float CROSS     = 30.0;   // seconds one crossing takes (then about 12 s of open water)
-const float WIDTH     = 0.38;   // whale length as a fraction of the window width
+const float WIDTH     = 0.75;   // whale length as a fraction of the window width
 const float SPOUT     = 7.0;    // seconds between two spouts
 const int   DROPS     = 20;     // water drops in one spout
 
@@ -120,9 +120,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // easier to think about with y pointing up, so flip it once here.
     vec2 p = vec2(uv.x * aspect, 1.0 - uv.y);
 
-    // Big things big: the whale is a fixed share of the window width, capped so a
-    // very wide window does not make it taller than the lower half.
-    float size = min(WIDTH * aspect / 2.45, 0.42);               // half the body length
+    // Big things big: the whale spans most of the window width. The cap only stops a
+    // very wide window from making it taller than about half the window.
+    float size = min(WIDTH * aspect / 2.45, 0.95);               // half the body length
 
     // Shift the clock so the whale is already well inside the window at start.
     float clock = iTime + 0.30 * CROSS;
@@ -134,7 +134,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float margin = 1.45 * size;                              // fluke tip to snout
         float x = mix(-margin, aspect + margin, t);
         if (dir < 0.0) x = aspect - x;
-        float y = 0.30 + 0.03 * sin(clock * 0.25);
+        float y = 0.40 + 0.04 * sin(clock * 0.25);
         float tilt = 0.06 * cos(clock * 0.25);                   // nose follows the slow rise and fall
 
         vec2 q = (p - vec2(x, y)) / size;
