@@ -10,6 +10,7 @@ bgp                 # 上一张 / previous image
 bgr                 # 随机一张 / random image
 bgs                 # 用 fzf 挑一张（带预览）/ pick one with fzf (with preview)
 bg+ / bg-           # 背景图浓一点 / 淡一点 / stronger / fainter
+bgw                 # 配置文件和图库在哪 / where the files are
 ```
 
 `bgs` 是 `ghostty-bg` 的简写，两个名字是同一个命令。/ `bgs` is short for `ghostty-bg` — same command.
@@ -26,7 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 
 安装脚本会做三件事：
 
-1. 把 `ghostty-bg`（简写 `bgs`）和快捷命令 `bgn`、`bgp`、`bgr`、`bg+`、`bg-` 放到 `~/.local/bin`。
+1. 把 `ghostty-bg`（简写 `bgs`）和快捷命令 `bgn`、`bgp`、`bgr`、`bg+`、`bg-`、`bgw` 放到 `~/.local/bin`。
 2. 运行 `ghostty-bg init`：先**备份**你的 Ghostty 配置，再在末尾加上一行 `config-file = ?background.ghostty`（外加默认透明度 0.2、铺满窗口；你已经设过的不会重复添加）。
 3. 建好图库目录 `backgrounds/`，就在你的 Ghostty 配置文件旁边。
 4. 如果图库是空的，自动放进 3 张样图（AI 生成的风景，见 [`samples/`](samples/)），装完马上就能 `bgn` 体验。已经有图的话不会动。
@@ -37,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 bgs add ~/Pictures/some-photo.jpg
 ```
 
-样图不需要的话，`bgs where` 找到图库目录，把 `sunset-sea.jpg`、`atoll-aerial.jpg`、`savanna.jpg` 删掉就行。
+样图不需要的话，`bgw` 找到图库目录，把 `sunset-sea.jpg`、`atoll-aerial.jpg`、`savanna.jpg` 删掉就行。
 
 > 如果提示 `~/.local/bin` 不在 PATH 里，按提示把那行 `export PATH=...` 加进 `~/.zshrc`，再开一个新终端。
 
@@ -63,7 +64,7 @@ cd ghostty-bg && ./install.sh
 | `bgs off` | 关掉背景图 |
 | `bg+` / `bg-` | 背景图浓一点 / 淡一点（每次 ±0.05） |
 | `bgs opacity` | 查看当前浓度；`bgs opacity 0.3` 直接设成 0.3 |
-| `bgs where` | 显示用到的配置文件和图库位置 |
+| `bgw` | 显示用到的配置文件和图库位置（= `bgs where`） |
 | `bgs init` | 首次设置（安装脚本已自动运行，重复运行也没关系） |
 | `bgs help` | 查看帮助 |
 
@@ -91,10 +92,10 @@ export GHOSTTY_BG_LANG=zh   # 或 en
 ## 卸载
 
 ```bash
-rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-}
+rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-,bgw}
 ```
 
-再从 Ghostty 配置里删掉 `# --- ghostty-bg ---` 下面那几行；图库目录 `backgrounds/` 和 `background.ghostty` 按需删除（`ghostty-bg where` 可以看到它们在哪）。
+再从 Ghostty 配置里删掉 `# --- ghostty-bg ---` 下面那几行；图库目录 `backgrounds/` 和 `background.ghostty` 按需删除（`bgw` 可以看到它们在哪）。
 
 ---
 
@@ -107,15 +108,15 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 bgs add ~/Pictures/some-photo.jpg
 ```
 
-The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` in `~/.local/bin`, then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; delete them any time.
+The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` / `bgw` in `~/.local/bin`, then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; delete them any time.
 
-**Commands** (`bgs` = `ghostty-bg`): `bgs add <image>`, `bgs list`, `bgs off`, `bgs where`, `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random, `bg+` / `bg-` image opacity ±0.05 (or `bgs opacity 0.3`).
+**Commands** (`bgs` = `ghostty-bg`): `bgs add <image>`, `bgs list`, `bgs off`, `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random, `bg+` / `bg-` image opacity ±0.05 (or `bgs opacity 0.3`), `bgw` where the files are.
 
 **Language:** messages are in Chinese when `LANG` starts with `zh`, English otherwise. Override with `export GHOSTTY_BG_LANG=en` (or `zh`).
 
 **How it works:** `ghostty-bg` rewrites only the one-line `background.ghostty` file, then sends `SIGUSR2` to Ghostty, which reloads its config.
 
-**Uninstall:** `rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-}`, then remove the `# --- ghostty-bg ---` block from your Ghostty config.
+**Uninstall:** `rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-,bgw}`, then remove the `# --- ghostty-bg ---` block from your Ghostty config.
 
 ## License
 

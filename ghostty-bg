@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-VERSION="1.3.0"
+VERSION="1.4.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -330,9 +330,9 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgs list          列出图库，* 是当前这张
   bgs off           关掉背景图
   bgs opacity       查看背景图浓度；bgs opacity 0.3 设成 0.3；+ / - 每次加减 0.05
-  bgs where         显示用到的配置文件和图库位置
+  bgs where         显示用到的配置文件和图库位置（= bgw）
 
-快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点
+快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgw = 文件在哪
 
 语言：GHOSTTY_BG_LANG=zh 或 en（默认跟随 LANG）
 EOF
@@ -349,9 +349,9 @@ Usage (bgs and ghostty-bg are the same command):
   bgs list          list the library, * marks the current image
   bgs off           turn the background image off
   bgs opacity       show the image opacity; bgs opacity 0.3 sets it; + / - step by 0.05
-  bgs where         show which files ghostty-bg uses
+  bgs where         show which files ghostty-bg uses (= bgw)
 
-Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter
+Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgw = where
 
 Language: GHOSTTY_BG_LANG=zh or en (default: follows LANG)
 EOF

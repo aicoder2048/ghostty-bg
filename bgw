@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# bgw — shortcut for `ghostty-bg where`: show where ghostty-bg keeps its files.
+exec ghostty-bg where "$@"
