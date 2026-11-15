@@ -59,6 +59,12 @@ cd ghostty-bg && ./install.sh
 - [`fzf`](https://github.com/junegunn/fzf)：用来挑图，`brew install fzf`
 - [`chafa`](https://hpjansson.org/chafa/)：在 fzf 里预览图片，`brew install chafa`
 
+提示语言：中文环境（`LANG` 以 `zh` 开头）自动显示中文，否则显示英文。也可以在 `~/.zshrc` 里指定：
+
+```bash
+export GHOSTTY_BG_LANG=zh   # 或 en
+```
+
 调透明度、显示方式：直接改你的 Ghostty 配置里的 `background-image-opacity`（0.1–0.3 比较合适）和 `background-image-fit`（`cover` 铺满 / `contain` 完整显示）。
 
 ## 原理
@@ -89,6 +95,8 @@ ghostty-bg add ~/Pictures/some-photo.jpg
 The installer puts `ghostty-bg` and `bgn` in `~/.local/bin`, then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them).
 
 **Commands:** `add <image>`, `next` (or just `bgn`), `prev`, `random`, `list`, `off`, `where`, `init`, and no arguments to pick with fzf (preview via chafa if installed).
+
+**Language:** messages are in Chinese when `LANG` starts with `zh`, English otherwise. Override with `export GHOSTTY_BG_LANG=en` (or `zh`).
 
 **How it works:** `ghostty-bg` rewrites only the one-line `background.ghostty` file, then sends `SIGUSR2` to Ghostty, which reloads its config.
 

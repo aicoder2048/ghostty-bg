@@ -1,33 +1,43 @@
 #!/usr/bin/env bash
 # ghostty-bg — switch the Ghostty terminal background image with one command (macOS).
-#
-# Usage:
-#   ghostty-bg init          one-time setup: hook into your Ghostty config, create the image folder
-#   ghostty-bg add <image>   copy an image (PNG/JPG) into the library and use it
-#   ghostty-bg               pick an image with fzf (preview via chafa, if installed)
-#   ghostty-bg next | prev   switch to the next / previous image
-#   ghostty-bg random        switch to a random image
-#   ghostty-bg list          list the library, * marks the current image
-#   ghostty-bg off           turn the background image off
-#   ghostty-bg where         show which files ghostty-bg uses
+# ghostty-bg — 一条命令切换 Ghostty 终端背景图（macOS）。
 #
 # How it works: your Ghostty config includes a tiny file, background.ghostty,
 # that holds a single `background-image = ...` line. ghostty-bg rewrites only that
 # file, then sends SIGUSR2 to Ghostty, which makes Ghostty reload its config.
 #
+# Run `ghostty-bg help` for usage. 运行 `ghostty-bg help` 查看用法。
+#
 # Environment:
+#   GHOSTTY_BG_LANG     zh | en — message language (default: from LC_ALL / LC_MESSAGES / LANG)
 #   GHOSTTY_BG_CONFIG   path of the Ghostty config file to use (default: auto-detect)
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
+INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
 
-die()  { echo "ghostty-bg: $*" >&2; exit 1; }
-info() { echo "$*"; }
+# ---------- language ----------
 
-[[ "$(uname -s)" == "Darwin" ]] || die "ghostty-bg supports macOS only."
+detect_lang() {
+  case "${GHOSTTY_BG_LANG:-}" in
+    zh*|ZH*) echo zh; return ;;
+    en*|EN*) echo en; return ;;
+  esac
+  case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
+    zh*) echo zh ;;
+    *)   echo en ;;
+  esac
+}
+UI_LANG="$(detect_lang)"
+
+# msg "<English>" "<中文>" — print the text in the current language.
+msg() { if [[ "$UI_LANG" == zh ]]; then echo "$2"; else echo "$1"; fi; }
+die() { echo "ghostty-bg: $(msg "$1" "$2")" >&2; exit 1; }
+
+[[ "$(uname -s)" == "Darwin" ]] || die "ghostty-bg supports macOS only." "ghostty-bg 只支持 macOS。"
 
 # ---------- locating files ----------
 
@@ -51,7 +61,7 @@ find_config() {
   local c first=""
   while IFS= read -r c; do
     [[ -f "$c" ]] || continue
-    if grep -qE "^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME" "$c"; then
+    if grep -qE "$INCLUDE_RE" "$c"; then
       echo "$c"
       return
     fi
@@ -71,12 +81,11 @@ LIB_DIR="$CONFIG_DIR/backgrounds"
 BG_CONF="$CONFIG_DIR/$INCLUDE_NAME"
 
 is_initialized() {
-  [[ -f "$CONFIG_FILE" ]] &&
-    grep -qE "^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME" "$CONFIG_FILE"
+  [[ -f "$CONFIG_FILE" ]] && grep -qE "$INCLUDE_RE" "$CONFIG_FILE"
 }
 
 require_init() {
-  is_initialized || die "not set up yet — run: ghostty-bg init"
+  is_initialized || die "not set up yet — run: ghostty-bg init" "还没设置——请先运行：ghostty-bg init"
 }
 
 # ---------- reloading Ghostty ----------
@@ -94,7 +103,8 @@ reload_ghostty() {
     # shellcheck disable=SC2086  # word splitting is intended: one PID per word
     kill -USR2 $pids 2>/dev/null && return 0
   fi
-  info "(Could not reload Ghostty automatically — press cmd+shift+, in Ghostty to reload the config.)"
+  msg "(Could not reload Ghostty automatically — press cmd+shift+, in Ghostty to reload the config.)" \
+      "（没能自动重新加载——请在 Ghostty 里按 cmd+shift+, 重新加载配置。）"
 }
 
 # ---------- library ----------
@@ -120,11 +130,17 @@ write_include() {
 }
 
 set_image() {
-  local img="$1"
-  [[ -f "$img" ]] || die "image not found: $img"
+  local img="$1" name
+  [[ -f "$img" ]] || die "image not found: $img" "找不到图片：$img"
   write_include "$img"
   reload_ghostty
-  info "Background: $(basename "$img")"
+  name="$(basename "$img")"
+  msg "Background: $name" "背景已换成：$name"
+}
+
+empty_library() {
+  die "the library is empty — add one with: ghostty-bg add <image>" \
+      "图库是空的——先加一张：ghostty-bg add <图片>"
 }
 
 # ---------- commands ----------
@@ -134,13 +150,13 @@ cmd_init() {
   [[ -f "$BG_CONF" ]] || write_include ""
 
   if is_initialized; then
-    info "Already set up: $CONFIG_FILE"
+    msg "Already set up: $CONFIG_FILE" "已经设置过：$CONFIG_FILE"
   else
     if [[ -f "$CONFIG_FILE" ]]; then
       local backup
       backup="$CONFIG_FILE.bak.$(date +%Y%m%d_%H%M%S)"
       cp -p "$CONFIG_FILE" "$backup"
-      info "Backed up your config to: $backup"
+      msg "Backed up your config to: $backup" "已备份你的配置：$backup"
     fi
     {
       echo ""
@@ -151,23 +167,25 @@ cmd_init() {
       grep -qE '^[[:space:]]*background-image-fit[[:space:]]*=' "$CONFIG_FILE" 2>/dev/null ||
         echo "background-image-fit = cover"
     } >> "$CONFIG_FILE"
-    info "Added ghostty-bg settings to: $CONFIG_FILE"
+    msg "Added ghostty-bg settings to: $CONFIG_FILE" "已在配置里加上 ghostty-bg 的设置：$CONFIG_FILE"
   fi
 
-  info "Image folder: $LIB_DIR"
-  command -v fzf >/dev/null || info "Tip: install fzf to pick images interactively (e.g. brew install fzf)."
-  info ""
-  info "Next: ghostty-bg add ~/Pictures/some-photo.jpg"
+  msg "Image folder: $LIB_DIR" "图库目录：$LIB_DIR"
+  command -v fzf >/dev/null ||
+    msg "Tip: install fzf to pick images interactively (brew install fzf)." \
+        "提示：装上 fzf 就能交互式挑图（brew install fzf）。"
+  echo ""
+  msg "Next: ghostty-bg add ~/Pictures/some-photo.jpg" "下一步：ghostty-bg add ~/Pictures/某张照片.jpg"
 }
 
 cmd_add() {
   require_init
   local src="${1:-}" name dest
-  [[ -n "$src" ]] || die "usage: ghostty-bg add <image.png|image.jpg>"
-  [[ -f "$src" ]] || die "image not found: $src"
+  [[ -n "$src" ]] || die "usage: ghostty-bg add <image.png|image.jpg>" "用法：ghostty-bg add <图片.png|图片.jpg>"
+  [[ -f "$src" ]] || die "image not found: $src" "找不到图片：$src"
   case "$(printf '%s' "$src" | tr '[:upper:]' '[:lower:]')" in
     *.png|*.jpg|*.jpeg) ;;
-    *) die "only PNG and JPG are supported: $src" ;;
+    *) die "only PNG and JPG are supported: $src" "只支持 PNG 和 JPG：$src" ;;
   esac
   mkdir -p "$LIB_DIR"
   name="$(basename "$src")"
@@ -177,7 +195,8 @@ cmd_add() {
     dest="$LIB_DIR/$(date +%Y%m%d_%H%M%S)-$name"
   fi
   [[ -e "$dest" ]] || cp "$src" "$dest"
-  info "Added to library: $(basename "$dest")"
+  name="$(basename "$dest")"
+  msg "Added to library: $name" "已加入图库：$name"
   set_image "$dest"
 }
 
@@ -186,7 +205,7 @@ cmd_step() {
   local direction="$1" images=() line cur idx=-1 i n
   while IFS= read -r line; do images+=("$line"); done < <(list_images)
   n=${#images[@]}
-  (( n > 0 )) || die "the library is empty — add one with: ghostty-bg add <image>"
+  (( n > 0 )) || empty_library
   cur="$(current_image)"
   for i in "${!images[@]}"; do
     if [[ "${images[$i]}" == "$cur" ]]; then idx=$i; fi
@@ -203,8 +222,10 @@ cmd_step() {
 
 cmd_pick() {
   require_init
-  command -v fzf >/dev/null || die "fzf is needed for the picker (e.g. brew install fzf), or use: ghostty-bg next"
-  [[ -n "$(list_images)" ]] || die "the library is empty — add one with: ghostty-bg add <image>"
+  command -v fzf >/dev/null ||
+    die "fzf is needed for the picker (brew install fzf), or use: ghostty-bg next" \
+        "挑图需要 fzf（brew install fzf），或者用：ghostty-bg next"
+  [[ -n "$(list_images)" ]] || empty_library
   # Preview with chafa only if it actually runs (a Homebrew upgrade can break its libraries).
   local preview='echo {}'
   if command -v chafa >/dev/null && chafa --version >/dev/null 2>&1; then
@@ -213,8 +234,9 @@ cmd_pick() {
     [[ "${TERM_PROGRAM:-}" == "ghostty" ]] && fmt='--format=kitty'
     preview="chafa $fmt --size=\${FZF_PREVIEW_COLUMNS}x\${FZF_PREVIEW_LINES} {}"
   fi
-  local choice
-  choice="$(list_images | fzf --prompt='background> ' --preview "$preview" \
+  local choice prompt
+  prompt="$(msg 'background> ' '背景图> ')"
+  choice="$(list_images | fzf --prompt="$prompt" --preview "$preview" \
               --preview-window=right:65% --with-nth=-1 --delimiter=/)" || exit 0
   set_image "$choice"
 }
@@ -232,16 +254,67 @@ cmd_off() {
   require_init
   write_include ""
   reload_ghostty
-  info "Background image is off."
+  msg "Background image is off." "背景图已关闭。"
 }
 
 cmd_where() {
-  echo "config file : $CONFIG_FILE$(is_initialized && echo ' (set up)' || echo ' (not set up — run: ghostty-bg init)')"
-  echo "image folder: $LIB_DIR"
-  echo "managed file: $BG_CONF"
+  local state
+  if is_initialized; then
+    state="$(msg ' (set up)' '（已设置）')"
+  else
+    state="$(msg ' (not set up — run: ghostty-bg init)' '（未设置——请运行：ghostty-bg init）')"
+  fi
+  msg "config file : $CONFIG_FILE$state" "配置文件：$CONFIG_FILE$state"
+  msg "image folder: $LIB_DIR"            "图库目录：$LIB_DIR"
+  msg "managed file: $BG_CONF"            "背景文件：$BG_CONF"
 }
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() {
+  if [[ "$UI_LANG" == zh ]]; then
+    cat <<'EOF'
+ghostty-bg —— 一条命令切换 Ghostty 终端背景图（macOS）
+
+用法：
+  ghostty-bg init          首次设置：接入你的 Ghostty 配置，建好图库目录
+  ghostty-bg add <图片>    把图片（PNG/JPG）复制进图库并设为背景
+  ghostty-bg               用 fzf 挑一张（装了 chafa 会显示预览）
+  ghostty-bg next | prev   下一张 / 上一张（bgn 等于 ghostty-bg next）
+  ghostty-bg random        随机一张
+  ghostty-bg list          列出图库，* 是当前这张
+  ghostty-bg off           关掉背景图
+  ghostty-bg where         显示用到的配置文件和图库位置
+
+语言：GHOSTTY_BG_LANG=zh 或 en（默认跟随 LANG）
+EOF
+  else
+    cat <<'EOF'
+ghostty-bg — switch the Ghostty terminal background image with one command (macOS)
+
+Usage:
+  ghostty-bg init          one-time setup: hook into your Ghostty config, create the image folder
+  ghostty-bg add <image>   copy an image (PNG/JPG) into the library and use it
+  ghostty-bg               pick an image with fzf (preview via chafa, if installed)
+  ghostty-bg next | prev   switch to the next / previous image (bgn = ghostty-bg next)
+  ghostty-bg random        switch to a random image
+  ghostty-bg list          list the library, * marks the current image
+  ghostty-bg off           turn the background image off
+  ghostty-bg where         show which files ghostty-bg uses
+
+Language: GHOSTTY_BG_LANG=zh or en (default: follows LANG)
+EOF
+  fi
+}
+
+# With no arguments: open the picker if set up, otherwise explain how to start.
+pick_or_help() {
+  if is_initialized; then
+    cmd_pick
+  else
+    usage
+    echo
+    die "not set up yet — run: ghostty-bg init" "还没设置——请先运行：ghostty-bg init"
+  fi
+}
 
 main() {
   case "${1:-}" in
@@ -258,11 +331,6 @@ main() {
       # Shortcut: `ghostty-bg <image>` works like `ghostty-bg add <image>`.
       if [[ -f "$1" ]]; then cmd_add "$1"; else usage; exit 1; fi ;;
   esac
-}
-
-# With no arguments: open the picker if set up, otherwise explain how to start.
-pick_or_help() {
-  if is_initialized; then cmd_pick; else usage; echo; die "not set up yet — run: ghostty-bg init"; fi
 }
 
 main "$@"
