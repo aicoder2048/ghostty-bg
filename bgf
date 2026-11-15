@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# bgf — shortcut for `ghostty-bg fx`: animated effects (bgf snow, bgf off; bgf alone lists them).
+exec ghostty-bg fx "$@"

@@ -9,6 +9,7 @@
 # Environment:
 #   GHOSTTY_BG_BIN    where to install the commands (default: ~/.local/bin)
 #   GHOSTTY_BG_LANG   zh | en — message language (default: follows LANG)
+#   GHOSTTY_BG_SHARE  where to install the effect shaders (default: ~/.local/share/ghostty-bg)
 
 set -euo pipefail
 
@@ -25,9 +26,12 @@ fi
 
 REPO_RAW="${GHOSTTY_BG_REPO_RAW:-https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main}"
 SAMPLES=(sunset-sea.jpg atoll-aerial.jpg savanna.jpg)
+# Animated effects (GLSL shaders) for `bgf`; ghostty-bg looks for them here.
+FX=(snow.glsl rain.glsl fireflies.glsl stars.glsl)
+FX_DIR="${GHOSTTY_BG_SHARE:-$HOME/.local/share/ghostty-bg}/fx"
 BIN_DIR="${GHOSTTY_BG_BIN:-$HOME/.local/bin}"
-# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd / bgh / bgm / bgx are one-line shortcuts.
-FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw bgd bgh bgm bgx)
+# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd / bgh / bgm / bgx / bgf are one-line shortcuts.
+FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw bgd bgh bgm bgx bgf)
 
 mkdir -p "$BIN_DIR"
 
@@ -46,6 +50,16 @@ for f in "${FILES[@]}"; do
   chmod +x "$BIN_DIR/$f"
   msg "Installed: $BIN_DIR/$f" "已安装：$BIN_DIR/$f"
 done
+
+mkdir -p "$FX_DIR"
+for f in "${FX[@]}"; do
+  if [[ -n "$SRC_DIR" ]]; then
+    cp "$SRC_DIR/fx/$f" "$FX_DIR/$f"
+  else
+    curl -fsSL "$REPO_RAW/fx/$f" -o "$FX_DIR/$f"
+  fi
+done
+msg "Installed: ${#FX[@]} effects in $FX_DIR" "已安装：${#FX[@]} 个特效，在 $FX_DIR"
 
 # bgs is a short name for ghostty-bg. A symlink keeps both names on the same file
 # (it is created here rather than stored in the repo, so curl installs work too).
