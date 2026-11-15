@@ -1,8 +1,10 @@
+ants.glsl
 aurora.glsl
 balloons.glsl
 bats.glsl
 bees.glsl
 binary.glsl
+birds.glsl
 blackhole.glsl
 blocks.glsl
 bubbles.glsl
@@ -19,7 +21,6 @@ dolphins.glsl
 dragon.glsl
 dragonflies.glsl
 drizzle.glsl
-eagle.glsl
 embers.glsl
 fairies.glsl
 fireflies.glsl
@@ -61,7 +62,6 @@ sparklers.glsl
 sparkles.glsl
 sunbeams.glsl
 sunflowers.glsl
-tiger.glsl
 tornado.glsl
 turtle.glsl
 ufo.glsl
