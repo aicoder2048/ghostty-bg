@@ -1,0 +1,9 @@
+# Never commit images or local Ghostty config — this repo ships code only.
+*.png
+*.jpg
+*.jpeg
+*.heic
+*.webp
+*.ghostty
+backgrounds/
+.DS_Store

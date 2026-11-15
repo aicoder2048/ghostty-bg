@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# bgn — shortcut for `ghostty-bg next`: switch Ghostty to the next background image.
+exec ghostty-bg next "$@"
