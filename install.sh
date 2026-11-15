@@ -26,8 +26,8 @@ fi
 REPO_RAW="${GHOSTTY_BG_REPO_RAW:-https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main}"
 SAMPLES=(sunset-sea.jpg atoll-aerial.jpg savanna.jpg)
 BIN_DIR="${GHOSTTY_BG_BIN:-$HOME/.local/bin}"
-# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw are one-line shortcuts.
-FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw)
+# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd are one-line shortcuts.
+FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw bgd)
 
 mkdir -p "$BIN_DIR"
 

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# bgd — shortcut for `ghostty-bg rm --current`: move the current background image to the Trash
+# and switch to the next one.
+exec ghostty-bg rm --current "$@"

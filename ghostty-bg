@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-VERSION="1.5.0"
+VERSION="1.6.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -378,6 +378,110 @@ cmd_opacity() {
   msg "Background image opacity: $cur -> $new" "背景图浓度：$cur -> $new"
 }
 
+# Move a file to the macOS Trash, so a mistaken delete can be undone from Finder.
+to_trash() {
+  if command -v trash >/dev/null; then
+    trash -s "$1"
+  else
+    # Older macOS without /usr/bin/trash: move it into ~/.Trash ourselves.
+    local base dest
+    base="$(basename "$1")"
+    dest="$HOME/.Trash/$base"
+    [[ -e "$dest" ]] && dest="$HOME/.Trash/$(date +%Y%m%d_%H%M%S)-$base"
+    mkdir -p "$HOME/.Trash" && mv "$1" "$dest"
+  fi
+}
+
+# Resolve a name from `bgs list` (or a path inside the library) to a library file.
+resolve_library_image() {
+  local arg="$1" path
+  if [[ "$arg" == */* ]]; then
+    path="$(cd "$(dirname "$arg")" 2>/dev/null && pwd)/$(basename "$arg")"
+    [[ "$(dirname "$path")" == "$LIB_DIR" ]] || return 1
+  else
+    path="$LIB_DIR/$arg"
+  fi
+  [[ -f "$path" ]] && is_image "$path" && echo "$path"
+}
+
+# bgs rm <name>...    move these library images to the Trash
+# bgs rm              pick images with fzf (Tab to select several)
+# bgs rm --current    the current background (used by bgd)
+# Only the library copy is removed; the original photo you added is untouched.
+cmd_rm() {
+  require_init
+  local before cur targets="" arg path removed=0 failed=0
+
+  before="$(list_images)"
+  [[ -n "$before" ]] || empty_library
+  cur="$(current_image)"
+
+  if [[ "${1:-}" == "--current" ]]; then
+    [[ -n "$cur" && -f "$cur" ]] ||
+      die "no background image is set right now." "现在没有设置背景图。"
+    targets="$cur"
+  elif (( $# == 0 )); then
+    command -v fzf >/dev/null ||
+      die "name the images to remove (see: bgs list), or install fzf to pick them" \
+          "请写出要删的图片名（见 bgs list），或者装上 fzf 来挑选"
+    local preview='echo {}' prompt
+    if command -v chafa >/dev/null && chafa --version >/dev/null 2>&1; then
+      local fmt=''
+      [[ "${TERM_PROGRAM:-}" == "ghostty" ]] && fmt='--format=kitty'
+      preview="chafa $fmt --size=\${FZF_PREVIEW_COLUMNS}x\${FZF_PREVIEW_LINES} {}"
+    fi
+    prompt="$(msg 'remove (Tab = select several)> ' '删除（Tab 多选）> ')"
+    targets="$(printf '%s\n' "$before" | fzf --multi --prompt="$prompt" --preview "$preview" \
+                 --preview-window=right:65% --with-nth=-1 --delimiter=/)" || exit 0
+  else
+    for arg in "$@"; do
+      if path="$(resolve_library_image "$arg")"; then
+        targets="$targets$path"$'\n'
+      else
+        msg "  not in the library: $arg   (see: bgs list)" "  图库里没有：$arg   （见 bgs list）"
+        failed=$((failed + 1))
+      fi
+    done
+  fi
+
+  while IFS= read -r path; do
+    [[ -n "$path" && -f "$path" ]] || continue
+    if to_trash "$path"; then
+      msg "  moved to Trash: $(basename "$path")" "  已移到废纸篓：$(basename "$path")"
+      removed=$((removed + 1))
+    else
+      msg "  could not remove: $(basename "$path")" "  删除失败：$(basename "$path")"
+      failed=$((failed + 1))
+    fi
+  done <<< "$targets"
+
+  (( removed > 0 )) || die "nothing was removed." "没有删除任何图片。"
+
+  # If the current background was removed, move on to the next remaining image
+  # (in list order, wrapping around), or turn the background off if none are left.
+  if [[ -n "$cur" && ! -f "$cur" ]]; then
+    local next="" seen=0 img
+    while IFS= read -r img; do
+      if (( seen )) && [[ -f "$img" ]]; then next="$img"; break; fi
+      [[ "$img" == "$cur" ]] && seen=1
+    done <<< "$before"
+    if [[ -z "$next" ]]; then
+      while IFS= read -r img; do
+        if [[ -f "$img" ]]; then next="$img"; break; fi
+      done <<< "$before"
+    fi
+    if [[ -n "$next" ]]; then
+      set_image "$next"
+    else
+      write_include "" "$(managed_opacity)"
+      reload_ghostty
+      msg "The library is empty now, so the background image is off." "图库已经空了，背景图已关闭。"
+    fi
+  fi
+
+  if (( failed > 0 )); then exit 1; fi
+}
+
 cmd_where() {
   local state
   if is_initialized; then
@@ -403,10 +507,11 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgs random        随机一张
   bgs list          列出图库，* 是当前这张
   bgs off           关掉背景图
+  bgs rm <名字>     把图库里的图移到废纸篓（不写名字就用 fzf 多选；原图不受影响）
   bgs opacity       查看背景图浓度；bgs opacity 0.3 设成 0.3；+ / - 每次加减 0.05
   bgs where         显示用到的配置文件和图库位置（= bgw）
 
-快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgw = 文件在哪
+快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgw = 文件在哪，bgd = 删掉当前这张
 
 语言：GHOSTTY_BG_LANG=zh 或 en（默认跟随 LANG）
 EOF
@@ -422,10 +527,11 @@ Usage (bgs and ghostty-bg are the same command):
   bgs random        switch to a random image
   bgs list          list the library, * marks the current image
   bgs off           turn the background image off
+  bgs rm <name>     move library images to the Trash (no name: pick with fzf; originals untouched)
   bgs opacity       show the image opacity; bgs opacity 0.3 sets it; + / - step by 0.05
   bgs where         show which files ghostty-bg uses (= bgw)
 
-Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgw = where
+Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgw = where, bgd = delete the current image
 
 Language: GHOSTTY_BG_LANG=zh or en (default: follows LANG)
 EOF
@@ -451,6 +557,7 @@ main() {
     next|prev|random)  cmd_step "$1" ;;
     list|ls)           cmd_list ;;
     off)               cmd_off ;;
+    rm|remove|delete)  shift; cmd_rm "$@" ;;
     opacity)           shift; cmd_opacity "${1:-}" ;;
     where)             cmd_where ;;
     -v|--version)      echo "ghostty-bg $VERSION" ;;
