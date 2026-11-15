@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="1.8.0"
+VERSION="1.8.1"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -272,8 +272,13 @@ make_wide() {
   [[ "$h" =~ ^[0-9]+$ ]] || return 1
   (( h > 2160 )) && h=2160
   w=$(( h * 16 / 10 ))
+  # The blurred backdrop is made at 1/8 size and scaled back up: about 20x faster
+  # than blurring at full size (0.5 s instead of 9 s for a phone photo), and it
+  # looks the same, since the backdrop is meant to be soft anyway.
+  local sw=$(( w / 8 )) sh=$(( h / 8 ))
   magick "$src" -auto-orient -resize "x$h" \
-    \( +clone -resize "${w}x${h}^" -gravity center -extent "${w}x${h}" -blur 0x40 -modulate 70 \) \
+    \( +clone -resize "${sw}x${sh}^" -gravity center -extent "${sw}x${sh}" \
+       -blur 0x5 -resize "${w}x${h}!" -modulate 70 \) \
     +swap -gravity center -composite -strip -quality 90 "$dest" 2>/dev/null
 }
 
@@ -309,8 +314,11 @@ free_library_path() {
   echo "$dest"
 }
 
-added() {   # $1: library path, $2: optional note
-  msg "  added: $(basename "$1")${2:+  ($2)}" "  已加入：$(basename "$1")${3:+（$3）}"
+# Line prefix while adding: "[ 3/20] " when several images are added, else "  ".
+ADD_PREFIX="  "
+
+added() {   # $1: library path, $2 / $3: optional note in English / Chinese
+  msg "${ADD_PREFIX}added: $(basename "$1")${2:+  ($2)}" "${ADD_PREFIX}已加入：$(basename "$1")${3:+（$3）}"
   [[ -n "$ADD_FIRST" ]] || ADD_FIRST="$1"
   ADD_COUNT=$((ADD_COUNT + 1))
 }
@@ -323,7 +331,7 @@ add_one() {
     dup="$(find_widened "$sha")"
   fi
   if [[ -n "$dup" ]]; then
-    msg "  already in library: $(basename "$dup")" "  图库里已有：$(basename "$dup")"
+    msg "${ADD_PREFIX}already in library: $(basename "$dup")" "${ADD_PREFIX}图库里已有：$(basename "$dup")"
     DUP_FOUND="$dup"
     SKIP_COUNT=$((SKIP_COUNT + 1))
     return
@@ -338,8 +346,8 @@ add_one() {
       return
     fi
     rm -f "$dest"
-    msg "  (could not widen $base with ImageMagick; adding it as is)" \
-        "  （ImageMagick 处理 $base 失败，按原图加入）"
+    msg "${ADD_PREFIX}(could not widen $base with ImageMagick; adding it as is)" \
+        "${ADD_PREFIX}（ImageMagick 处理 $base 失败，按原图加入）"
   fi
 
   dest="$(free_library_path "$(basename "$src")")"
@@ -357,19 +365,23 @@ cmd_add() {
   require_init
   (( $# > 0 )) || die "usage: bgs add <image|folder> [...]" "用法：bgs add <图片|文件夹> [...]"
   mkdir -p "$LIB_DIR"
-  local arg f found
+  local arg f found queue="" total=0 i=0
+
+  # Pass 1: collect every image, so the total is known before the slow part starts.
   for arg in "$@"; do
     if [[ -d "$arg" ]]; then
       found=0
       while IFS= read -r f; do
         found=1
-        add_one "$f"
+        queue="$queue$f"$'\n'
+        total=$((total + 1))
       done < <(find "$arg" -maxdepth 1 -type f \
                  \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) | sort)
       (( found )) || msg "  no PNG/JPG in folder: $arg" "  文件夹里没有 PNG/JPG：$arg"
     elif [[ -f "$arg" ]]; then
       if is_image "$arg"; then
-        add_one "$arg"
+        queue="$queue$arg"$'\n'
+        total=$((total + 1))
       else
         msg "  skipped (only PNG and JPG are supported): $arg" "  跳过（只支持 PNG 和 JPG）：$arg"
         SKIP_COUNT=$((SKIP_COUNT + 1))
@@ -379,6 +391,16 @@ cmd_add() {
       SKIP_COUNT=$((SKIP_COUNT + 1))
     fi
   done
+
+  # Pass 2: add them, numbering the lines when there is more than one.
+  local width=${#total}
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    i=$((i + 1))
+    if (( total > 1 )); then ADD_PREFIX="$(printf '[%*d/%d] ' "$width" "$i" "$total")"; fi
+    add_one "$f"
+  done <<< "$queue"
+  ADD_PREFIX="  "
 
   if (( ADD_COUNT + SKIP_COUNT > 1 )); then
     msg "Added $ADD_COUNT, skipped $SKIP_COUNT." "加入 $ADD_COUNT 张，跳过 $SKIP_COUNT 张。"
