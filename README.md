@@ -75,6 +75,24 @@ cd ghostty-bg && ./install.sh
 | `bgs init` | 首次设置（安装脚本已自动运行，重复运行也没关系） |
 | `bgs help` | 查看帮助 |
 
+### 缩写速记
+
+所有命令都是 `bg`（**b**ack**g**round，背景）加一个字母，字母就是动作的英文首字母：
+
+| 命令 | 字母的意思 | 作用 |
+|---|---|---|
+| `bgs` | **s**elect | 挑图（也是 `ghostty-bg` 的简写） |
+| `bgn` | **n**ext | 下一张 |
+| `bgp` | **p**revious | 上一张 |
+| `bgr` | **r**andom | 随机一张 |
+| `bgh` | **h**ide | 隐藏 / 显示 |
+| `bgd` | **d**elete | 删掉当前这张 |
+| `bgw` | **w**here | 文件在哪 |
+| `bgm` | **m**enu | 命令菜单 |
+| `bg+` / `bg-` | 多一点 / 少一点 | 背景图浓一点 / 淡一点 |
+
+忘了也没关系：敲 `bgm`，菜单最下面就有这张速记。
+
 可选依赖：
 
 - [`fzf`](https://github.com/junegunn/fzf)：用来挑图，`brew install fzf`
@@ -118,6 +136,8 @@ bgs add ~/Pictures/some-photo.jpg
 The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` / `bgw` / `bgd` / `bgh` / `bgm` in `~/.local/bin`, then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; remove them any time with `bgs rm`.
 
 **Commands** (`bgs` = `ghostty-bg`): `bgs add <image|folder> [...]` (a folder adds every PNG/JPG in it; images already in the library are skipped), `bgs list`, `bgs off` / `bgs on`, `bgs rm <name>...` (moves library images to the Trash; no name = pick with fzf), `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random, `bg+` / `bg-` image opacity ±0.05 (or `bgs opacity 0.3`), `bgw` where the files are, `bgd` delete the current image, `bgh` hide / show the background, `bgm` menu of all commands.
+
+**Glossary** — every name is `bg` (background) plus one letter for the action: `bgs` **s**elect, `bgn` **n**ext, `bgp` **p**revious, `bgr` **r**andom, `bgh` **h**ide, `bgd` **d**elete, `bgw` **w**here, `bgm` **m**enu, `bg+` / `bg-` more / less opacity. Forgot one? `bgm` shows them all.
 
 **Language:** messages are in Chinese when `LANG` starts with `zh`, English otherwise. Override with `export GHOSTTY_BG_LANG=en` (or `zh`).
 
