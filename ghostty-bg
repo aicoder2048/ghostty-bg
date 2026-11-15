@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-VERSION="1.7.1"
+VERSION="1.7.2"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -546,7 +546,8 @@ cmd_menu() {
          bgs rm <名字>          删图        bgs list  列出
   其他   bgw  文件在哪    bgm  这个菜单    bgs help  完整帮助
 
-  速记：bg = background，再加一个字母：n next · p previous · r random · s select
+  速记：bg = background，再加一个字母
+        n next · p previous · r random · s select
         h hide · d delete · w where · m menu · + 浓 · - 淡
 EOF
   else
@@ -558,7 +559,8 @@ EOF
            bgs rm <name>              remove      bgs list  list
   more     bgw  where       bgm  this menu   bgs help  full help
 
-  memo: bg = background, plus one letter: n next · p previous · r random · s select
+  memo: bg = background, plus one letter
+        n next · p previous · r random · s select
         h hide · d delete · w where · m menu · + stronger · - fainter
 EOF
   fi
