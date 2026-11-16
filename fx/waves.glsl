@@ -1,107 +1,93 @@
-// waves — rows of ocean waves roll along the bottom; every few seconds a big one curls into a foam-clawed tube and breaks.
+// waves — realistic surf along the bottom; every few seconds a long, wide swell peels from one end to the other, throwing spray and a broad band of lacy white water.
 // zh: 海浪
 // group: ocean
 // Part of ghostty-bg. It only draws on top and never moves or distorts the
 // text underneath.
 
-const float INTENSITY = 0.85;   // overall strength (0 = off)
-const float PERIOD    = 9.0;    // seconds between two big breaking waves
-const float BIG       = 0.19;   // height of a big wave in window heights (keep < ~0.2)
-const float ROLL      = 1.0;    // speed of the small rolling waves
-const int   DROPS     = 18;     // spray droplets when a big wave breaks
+const float INTENSITY = 0.90;   // overall strength (0 = off)
+const float PERIOD    = 8.0;    // seconds between two big breaking waves
+const float BIG       = 0.130;  // height of the big wave above sea level, in window heights
+const float SPAN      = 0.78;   // width of the big wave, as a fraction of the window width
+const float PEEL      = 1.8;    // seconds for the break to run from one end of the crest to the other
+const float SEA       = 0.10;   // mean sea level, in window heights from the bottom
+const float FOAM_CELL = 0.0080; // size of the foam bubbles/lace cells (window heights)
+const int   DROPS     = 28;     // spray droplets thrown up along the peeling lip
+const float OPACITY   = 0.62;   // opacity of the water body (text shows through)
 
-const float PI = 3.14159265;
+const float BREAK = 3.0;        // seconds into a cycle when the first end starts to break
 
-const vec3 FAR_COL   = vec3(0.22, 0.50, 0.60);
-const vec3 MID_DEEP  = vec3(0.07, 0.27, 0.47);
-const vec3 MID_LIT   = vec3(0.17, 0.53, 0.63);
-const vec3 NEAR_COL  = vec3(0.04, 0.16, 0.35);
-const vec3 LINE_COL  = vec3(0.72, 0.90, 0.94);
-const vec3 FOAM_COL  = vec3(0.97, 0.96, 0.90);
+const vec3 DEEP    = vec3(0.012, 0.085, 0.140);   // shadowed water in the troughs
+const vec3 MIDC    = vec3(0.030, 0.220, 0.290);   // ordinary blue-green
+const vec3 TURQ    = vec3(0.180, 0.660, 0.620);   // thin crest with light passing through
+const vec3 LIPC    = vec3(0.330, 0.780, 0.720);   // the thin pitching lip, lit from behind
+const vec3 SKY     = vec3(0.640, 0.800, 0.870);   // sky reflected at a grazing angle
+const vec3 FAR     = vec3(0.090, 0.250, 0.330);   // the sea further out
+const vec3 FOAM    = vec3(0.950, 0.970, 0.975);
+const vec3 FOAM_SH = vec3(0.600, 0.740, 0.800);   // foam in its own shadow
+const vec3 GLINT   = vec3(1.000, 0.960, 0.860);
 
-float hash1(float n) {
-    return fract(sin(n) * 43758.5453123);
+float hash1(float n) { return fract(sin(n) * 43758.5453123); }
+float hash2(vec2 p)  { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+vec2 hash22(vec2 p) {
+    return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
 }
 
-float hash2(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+float vnoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), u.x),
+               mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x), u.y);
 }
 
-// A peaked crest: sharp tops, broad troughs (like real swell), 0..1.
-float crest(float th, float sharp) {
-    return exp(sharp * (cos(th) - 1.0));
+// Gentle, wide undulation of the sea surface (we look at the swells face-on).
+float swells(float x) {
+    float t = iTime;
+    return 0.006 * sin(3.1 * x + 0.45 * t) + 0.004 * sin(7.3 * x - 0.60 * t + 1.0)
+         + 0.0015 * sin(19.0 * x + 1.3 * t);
 }
 
-// Height of one row of small waves rolling to the left.
-float rowH(float x, float base, float amp, float k, float spd, float seed) {
-    float t = iTime * ROLL;
-    float a = crest(k * x + spd * t + seed, 1.8);
-    float b = crest(1.71 * k * x + 1.37 * spd * t + seed * 2.3, 2.4);
-    return base + amp * (0.70 * a + 0.35 * b + 0.15 * sin(0.37 * k * x + 0.5 * t + seed));
+// Cycle-wide state, set once per pixel in mainImage.
+float gXc, gHalf, gH, gS, gSeed, gV, gXr;
+
+// Height profile along the crest: broad and flat-topped, tapering at both ends.
+float envelope(float x) {
+    float u = (x - gXc) / gHalf;
+    return exp(-2.3 * u * u * u * u) * (0.92 + 0.08 * sin(x * 6.0 + gSeed));   // flat top, soft ends
 }
 
-// Signed distance (approx.) to a height field, negative below the surface.
-float rowD(vec2 p, float base, float amp, float k, float spd, float seed) {
-    float e = 0.002;
-    float h  = rowH(p.x, base, amp, k, spd, seed);
-    float dh = (rowH(p.x + e, base, amp, k, spd, seed) - rowH(p.x - e, base, amp, k, spd, seed)) / (2.0 * e);
-    return (p.y - h) / sqrt(1.0 + dh * dh);
+// Seconds since the break reached x (negative: not broken there yet).
+// The break starts at the right end and peels toward the left.
+float localAge(float x) { return gS - BREAK - (gXr - x) / gV; }
+
+// How much of the wave is still standing after it has broken there.
+float standing(float a) { return 1.0 - 0.88 * smoothstep(0.2, 1.6, a); }
+
+float crestY(float x) {
+    return SEA + swells(x) + gH * envelope(x) * standing(localAge(x));
 }
 
-// Shape of the big wave at s seconds into its life.
-struct Big {
-    float xc;     // x of the crest / top of the lip
-    float H;      // height above the base line
-    float c;      // how far the lip has curled, 0..1
-    float R;      // radius of the curl
-    float w0;     // lip thickness at its root
-    float S;      // angle the lip has swept round, radians
-    vec2  O;      // centre of the curl
-    float open;   // 0..1, how hollow the tube is
-};
-
-const float B0 = 0.095;          // base line of the big wave (the middle row)
-
-Big bigAt(float s, float xs, float hm) {
-    Big b;
-    b.xc = xs - 0.05 * s;                                   // drifts toward the shore (left)
-    float brk = smoothstep(4.6, 6.2, s);
-    b.H = hm * smoothstep(0.0, 2.6, s) * (1.0 - brk);
-    b.c = smoothstep(1.4, 4.2, s);
-    b.R = hm * 0.37 * (0.45 + 0.55 * smoothstep(0.5, 3.2, s)) * (1.0 - 0.5 * brk);
-    b.w0 = b.R * 0.46;
-    b.S = b.c * 2.05 + brk * 0.9;                            // lip keeps falling as it breaks
-    b.O = vec2(b.xc, B0 + b.H - b.R);
-    b.open = smoothstep(0.15, 0.55, b.c) * (1.0 - smoothstep(4.35, 4.85, s));   // the tube closes out
-    return b;
-}
-
-// Lip thickness at angle u along the curl (tapers toward the tip).
-float lipW(Big b, float u) {
-    return b.w0 * (1.0 - 0.65 * clamp(u / max(b.S, 1e-3), 0.0, 1.0));
-}
-
-// Outer radius of the lip: a spiral that tightens toward the tip.
-float spiralR(Big b, float u) {
-    return b.R * (1.0 - 0.22 * clamp(u / PI, 0.0, 1.0));
-}
-
-// Height of the front of the wave (dx < 0): a smooth swell that turns into a
-// concave face rising from the trough to the floor of the tube.
-float frontH(Big b, float dx) {
-    float wf = mix(0.11, 0.07, b.c);
-    float bump = b.H * exp(-dx * dx / (wf * wf));
-    // The face stays below the curl so the tube opens forward, not a closed ring.
-    float floorH = max(b.O.y - 1.9 * (b.R - b.w0) * b.open - B0, 0.0);
-    float f = clamp(1.0 + dx / (3.4 * b.R), 0.0, 1.0);
-    float face = floorH * f * f;
-    // Behind the tube floor the face meets the back slope.
-    return mix(bump, face, b.open);
-}
-
-vec2 tipOf(Big b) {
-    float a = PI * 0.5 + b.S;
-    return b.O + vec2(cos(a), sin(a)) * (spiralR(b, b.S) - 0.5 * lipW(b, b.S));
+// Lacy foam: veins between bubble cells (Voronoi F2-F1), thresholded crisply.
+// W = 0 nothing, small W thin broken veins, W = 1 nearly solid white water.
+float foamMask(vec2 p, float W, float px) {
+    if (W < 0.01) return 0.0;
+    vec2 g = p / FOAM_CELL;
+    g += 0.6 * vec2(vnoise(p * 70.0), vnoise(p * 70.0 + 9.1));   // irregular, not a grid
+    vec2 n = floor(g), f = fract(g);
+    float F1 = 8.0, F2 = 8.0;
+    for (int j = -1; j <= 1; j++)
+    for (int i = -1; i <= 1; i++) {
+        vec2 c = vec2(float(i), float(j));
+        vec2 o = hash22(n + c);
+        o = 0.5 + 0.42 * sin(iTime * 0.6 + 6.2831 * o);         // bubbles shift slowly
+        vec2 r = c + o - f;
+        float d = dot(r, r);
+        if (d < F1) { F2 = F1; F1 = d; } else if (d < F2) { F2 = d; }
+    }
+    float e = sqrt(F2) - sqrt(F1);                                // 0 on the cell borders
+    float blot = vnoise(p * 45.0) * 0.6 + vnoise(p * 110.0) * 0.4;
+    float th = 1.15 * W - 0.12 + 0.55 * (blot - 0.5);
+    float aa = 1.2 * px / FOAM_CELL;
+    return smoothstep(th + aa, th - aa, e);
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
@@ -113,198 +99,164 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // easier to think about with y pointing up, so flip it once here.
     vec2 p = vec2(uv.x * aspect, 1.0 - uv.y);
 
-    vec3 rgb = base.rgb;
-    if (p.y > 0.36) {                        // nothing up here: the text area is free
+    if (p.y > 0.34) {                        // nothing up here: the text area is free
         fragColor = base;
         return;
     }
 
+    vec3 rgb = base.rgb;
     float px = 1.0 / iResolution.y;          // one pixel in scene units
     float k = INTENSITY;
 
-    // ---- back row: pale, low and calm --------------------------------------
+    // ---- this cycle's wave ----------------------------------------------------------
+    float tc = iTime + 1.0;                  // start partway in: a swell is already rising
+    float cyc = floor(tc / PERIOD);
+    gS = tc - cyc * PERIOD;
+    gSeed = cyc * 7.31 + 3.0;
+    gHalf = 0.5 * SPAN * aspect;
+    gXc = aspect * (0.55 + 0.06 * (hash1(gSeed) - 0.5));
+    gXr = gXc + 0.9 * gHalf;
+    gV = 1.8 * gHalf / PEEL;
+    gH = BIG * (0.90 + 0.20 * hash1(gSeed + 1.0)) * smoothstep(0.0, 2.8, gS)
+            * (1.0 - smoothstep(6.6, 8.0, gS));
+
+    float x = p.x;
+    float env = envelope(x);
+    float a = localAge(x);
+
+    // ---- the sea further out: two calm, paler rows of swell behind --------------
     {
-        float d = rowD(p, 0.150, 0.030, 9.0, 1.1, 1.7);
-        float fill = smoothstep(0.8 * px, -0.8 * px, d);
-        float a = fill * mix(0.42, 0.22, smoothstep(0.0, 0.08, -d));
-        rgb = mix(rgb, FAR_COL, a * k);
-        float line = 1.0 - smoothstep(0.5 * px, 1.4 * px, abs(d));
-        rgb = mix(rgb, LINE_COL, line * 0.45 * k);
+        float t = iTime;
+        float h1 = SEA + 0.052 + 0.004 * sin(4.0 * x + 0.3 * t) + 0.002 * sin(11.0 * x - 0.5 * t);
+        float h2 = SEA + 0.028 + 0.005 * sin(5.3 * x - 0.4 * t + 2.0) + 0.002 * sin(13.0 * x + 0.7 * t);
+        float c1 = smoothstep(0.7 * px, -0.7 * px, p.y - h1);
+        float c2 = smoothstep(0.7 * px, -0.7 * px, p.y - h2);
+        float st = vnoise(vec2(x * 22.0 + 0.1 * t, p.y * 260.0));
+        rgb = mix(rgb, FAR * (0.90 + 0.20 * st), c1 * 0.30 * k);
+        rgb = mix(rgb, mix(FAR, MIDC, 0.5) * (0.90 + 0.20 * st), c2 * 0.30 * k);
+        rgb = mix(rgb, SKY, smoothstep(-1.6 * px, 0.0, p.y - h1) * c1 * 0.08 * k);
+        rgb = mix(rgb, SKY, smoothstep(-1.6 * px, 0.0, p.y - h2) * c2 * 0.08 * k);
     }
 
-    // ---- the big wave of this cycle -----------------------------------------
-    float tc = iTime + 2.8;                  // start partway in: a wave is already rising
-    float n = floor(tc / PERIOD);
-    float s = tc - n * PERIOD;
-    float seed = n * 7.31 + 3.0;
-    float xs = aspect * (0.58 + 0.30 * hash1(seed));
-    float hm = BIG * (0.88 + 0.12 * hash1(seed + 1.0));
-    Big b = bigAt(s, xs, hm);
+    // ---- the near water and the face of the big wave ----------------------------
+    float yc = crestY(x);
+    float slope = (crestY(x + 0.002) - yc) / 0.002;
+    float d = (p.y - yc) / sqrt(1.0 + slope * slope);
+    float cov = smoothstep(0.8 * px, -0.8 * px, d);
+    float depth = max(-d, 0.0);                        // how far below the crest line
+    float faceH = max(yc - SEA - swells(x), 0.0);       // how tall the wave is here
 
-    // ---- middle row, with the big wave rising out of it ----------------------
-    float dMid = rowD(p, B0, 0.026, 12.0, 1.5, 4.2);
-    float dWater = dMid;
-    float foamLip = 0.0;
-    vec2 q = p - b.O;
-    float r = length(q);
-    float u = mod(atan(q.y, q.x) - PI * 0.5 + 2.0 * PI, 2.0 * PI);  // angle from the top, going left
+    // The lip pitching out over the face while the break passes.
+    float lipLen = 0.0;
+    if (a > 0.0 && a < 1.4) {
+        lipLen = 0.55 * gH * env * smoothstep(0.0, 0.45, a) * (1.0 - smoothstep(0.6, 1.2, a));
+    }
 
-    if (b.H > 0.002 && abs(p.x - b.xc) < 0.55) {
-        // Body: a broad back slope behind the crest; in front, a concave face
-        // that sweeps up from the trough into the tube as the wave curls.
-        float dx = p.x - b.xc;
-        float hb, sl;
-        if (dx >= 0.0) {
-            hb = b.H * exp(-dx * dx / 0.05);
-            sl = -2.0 * dx / 0.05 * hb;
-        } else {
-            float e = 0.002;
-            hb = frontH(b, dx);
-            sl = (frontH(b, dx + e) - hb) / e;
+    if (cov > 0.0) {
+        // Dark below, blue-green in the body, translucent turquoise near the
+        // thin top of the wave where the light comes through.
+        vec3 col = mix(MIDC, DEEP, smoothstep(0.6 * faceH, faceH + 0.09, depth));
+        float thin = smoothstep(0.012, 0.06, faceH) * (1.0 - smoothstep(0.0, 0.65 * faceH + 0.01, depth));
+        col = mix(col, TURQ, thin * 0.9);
+        // Horizontal streaks give the face its texture.
+        float st = vnoise(vec2(x * 26.0 + 0.2 * iTime, depth * 300.0));
+        col *= 0.90 + 0.20 * st;
+        if (lipLen > 0.0) {
+            // The curling lip: a bright, thin sheet hanging from the crest, with a
+            // shadowed hollow (the tube) under it.
+            float wob = 0.15 * lipLen * (vnoise(vec2(x * 30.0, a * 2.0)) - 0.5);
+            float lb = lipLen + wob;
+            float inLip  = smoothstep(lb + px, lb - px, depth);
+            float inTube = smoothstep(lb - px, lb + px, depth) * smoothstep(1.5 * lb + px, 1.5 * lb - px, depth);
+            col = mix(col, DEEP * 0.8, inTube * 0.75);
+            col = mix(col, LIPC * (0.85 + 0.25 * (1.0 - depth / max(lb, 1e-3))), inLip * 0.9);
         }
-        float dBody = (p.y - B0 - hb) / sqrt(1.0 + sl * sl);
+        float aw = OPACITY * mix(0.85, 1.0, smoothstep(0.0, 0.05, depth));
+        rgb = mix(rgb, col, cov * aw * k);
+        // Sky reflection right on the crest line (one or two pixels).
+        rgb = mix(rgb, SKY, smoothstep(-1.8 * px, -0.2 * px, -depth) * cov * 0.16 * k);
 
-        // Lip: a band along an inward spiral, from the top round to the tip.
-        bool back = u > 2.0 * PI - 0.7;                      // just behind the top
-        float w = back ? b.w0 : lipW(b, u);
-        float rc = back ? b.R : spiralR(b, u);
-        float dBand = abs(r - (rc - 0.5 * w)) - 0.5 * w;
-        float over = back ? 0.0 : max(u - b.S, 0.0);
-        float dLip = max(dBand, over * r);
-        dLip = mix(1.0, dLip, smoothstep(0.0, 0.08, b.S));     // no lip before it curls
-        dLip += smoothstep(4.7, 5.4, s) * b.w0;                // the lip dissolves into foam
-
-        // Hollow of the tube: everything inside the lip's inner edge.
-        float uh = min(u, b.S);
-        float dHole = r - (spiralR(b, uh) - lipW(b, uh)) * b.open;
-        // ...and the mouth below it, so the tube opens down toward the sea.
-        float rh = (b.R - b.w0) * b.open;
-        dHole = min(dHole, length(p - b.O - vec2(-0.55, -0.95) * rh) - 1.05 * rh);
-        if (b.open < 0.3) dHole = 1.0;                        // no tube yet: no pinhole
-
-        float dBig = max(dBody, -dHole);
-        dBig = min(dBig, dLip);
-        dWater = min(dWater, dBig);
-
-        // Foam on the outer side of the lip, scalloped on its inner edge;
-        // the whole lip turns to foam as it crashes.
-        float brk = smoothstep(4.4, 5.6, s);
-        float uu = u / max(b.S, 1e-3);
-        float grow = smoothstep(0.12, 0.75, uu + 0.4 * brk);   // a thin rim that thickens to the tip
-        float fl = step(0.12, uu + brk) * step(u, b.S + 0.01);
-        float cut = rc - w * grow * (0.62 + 0.14 * sin(u * 26.0)) - 0.6 * px;
-        float edge = smoothstep(cut - px, cut + px, r);
-        foamLip = fl * edge * smoothstep(px, -px, dLip);
-
-        // Foam claws: tapering fingers reaching past the tip, flaring outward.
-        float ex = u - b.S;
-        float clawLen = 0.85;
-        if (ex > 0.0 && ex < clawLen && b.S > 0.6) {
-            float wt = lipW(b, b.S);
-            float e = ex / clawLen;
-            float fr = (spiralR(b, b.S) - r) / wt + e * 0.7;  // 0 at the outer edge
-            float ki = floor(fr * 4.0);
-            if (ki >= 0.0 && ki < 4.0) {
-                float len = 0.45 + 0.55 * hash1(ki * 3.7 + seed);
-                float cen = (ki + 0.5) / 4.0;
-                float half_ = 0.17 * max(1.0 - e / len, 0.0);
-                float dc = (abs(fr - cen) - half_) * wt;
-                foamLip = max(foamLip, smoothstep(px, -px, dc) * step(e, len));
+        // Sun glitter: tiny crisp sparkles just under the surface.
+        if (depth < 0.024) {
+            vec2 gg = vec2(x / 0.016, depth / 0.008);
+            vec2 id = floor(gg);
+            float h = hash2(id + 17.0);
+            float tw = sin(iTime * (2.5 + 4.0 * h) + 6.2831 * hash2(id + 3.1));
+            if (h > 0.86 && tw > 0.6) {
+                vec2 o = vec2(0.25 + 0.5 * hash2(id + 5.0), 0.3 + 0.4 * h);
+                vec2 q = (fract(gg) - o) * vec2(0.016, 0.008);
+                float r = length(q * vec2(0.55, 1.6));         // glints are wider than tall
+                float g = smoothstep(0.9 * px, 0.2 * px, r) * smoothstep(0.6, 1.0, tw);
+                rgb = mix(rgb, GLINT, g * cov * 0.85 * k);
             }
         }
-        foamLip *= 1.0 - smoothstep(5.4, 6.4, s);
     }
 
-    {
-        float fill = smoothstep(0.8 * px, -0.8 * px, dWater);
-        float depth = -dWater;
-        // Light shines through the thin water near the crest: lighter higher up.
-        float lit = smoothstep(B0 - 0.02, B0 + 0.16, p.y);
-        vec3 col = mix(MID_DEEP, MID_LIT, lit);
-        float a = fill * mix(0.36, 0.64, smoothstep(B0 - 0.07, B0 + 0.03, p.y));
-        rgb = mix(rgb, col, a * k);
-
-        // Engraved contour lines just under the surface (Hokusai-style).
-        for (int i = 1; i <= 2; i++) {
-            float off = float(i) * 0.011;
-            float l = 1.0 - smoothstep(0.4 * px, 1.2 * px, abs(dWater + off));
-            rgb = mix(rgb, LINE_COL, l * fill * (0.30 - 0.08 * float(i)) * k);
-        }
-        float line = 1.0 - smoothstep(0.6 * px, 1.6 * px, abs(dWater));
-        rgb = mix(rgb, LINE_COL, line * 0.75 * k);
-        rgb = mix(rgb, FOAM_COL, foamLip * 0.92 * k);
+    // ---- foam density -------------------------------------------------------------
+    float W = 0.0;
+    float edge = smoothstep(0.05, 0.3, env);           // thin out toward the ends of the wave
+    // A crisp foam line feathers along the crest just ahead of the break.
+    if (a > -0.9 && a < 0.4 && gH > 0.02) {
+        float th = 0.002 + 0.008 * smoothstep(-0.9, 0.0, a);
+        W = max(W, cov * (1.0 - smoothstep(0.0, th, depth)) * smoothstep(-0.9, -0.5, a) * edge);
     }
-
-    // ---- whitewater: the broken wave runs on as a mound of lacy foam -----
-    float sb = s - 4.75;
-    if (sb > 0.0) {
-        Big bb = bigAt(4.75, xs, hm);
-        vec2 tip = tipOf(bb);
-        float age = sb / (PERIOD - 4.75);
-        float xl = tip.x - 0.06 - 0.10 * sb;                  // leading edge runs ahead
-        float xr = bb.xc + 0.12 - 0.02 * sb;
-        float fade = 1.0 - smoothstep(0.5, 1.0, age);
-        if (p.x > xl - 0.02 && p.x < xr + 0.02) {
-            float span = clamp((p.x - xl) / (xr - xl), 0.0, 1.0);
-            float env = smoothstep(0.0, 0.15, span) * smoothstep(1.0, 0.55, span);
-            float sea = rowH(p.x, B0, 0.026, 12.0, 1.5, 4.2);
-            float hgt = (0.010 + 0.035 * exp(-sb * 1.2)) * env;
-            // Bubbly top edge.
-            float fb = fract(p.x * 70.0 - sb * 0.6) * 2.0 - 1.0;
-            float top = sea + hgt * (0.80 + 0.20 * sqrt(1.0 - fb * fb));   // round bubbly bumps
-            float solid = smoothstep(px, -px, p.y - top) * smoothstep(-px, px, p.y - sea + 0.004);
-            // Lace below: dots of foam on a small grid, thinning out with depth.
-            vec2 g = vec2(p.x - 0.02 * sb, p.y) / 0.0068;
-            vec2 id = floor(g);
-            float h = hash2(id + n * 13.0);
-            float rad = 0.16 + 0.26 * hash2(id + 7.1);
-            float dot_ = smoothstep(rad + 0.14, rad - 0.14, length(fract(g) - 0.5));
-            float below = sea - 0.004 - p.y;                          // depth under the foam
-            float lace = dot_ * step(0.0, below) * step(h, env * (1.0 - below / 0.035));
-            // Loose bubbles drifting just above the mound.
-            float above = p.y - top;
-            lace = max(lace, dot_ * step(0.0, above) * step(above, 0.02) * step(h, 0.18 * env));
-            float foam = max(solid * smoothstep(0.02, 0.2, env), lace);
-            rgb = mix(rgb, FOAM_COL, foam * fade * 0.85 * k);
+    // The lip's leading edge frays into foam as it falls.
+    if (lipLen > 0.0) {
+        float fr = abs(depth - lipLen) - 0.006 * smoothstep(0.1, 0.6, a);
+        W = max(W, cov * (1.0 - smoothstep(0.0, 0.004, fr)) * 0.85 * edge);
+    }
+    // White water: the lip lands, explodes upward, then a broad band of foam
+    // rushes toward us (down the window), thins into lace and fades.
+    float ww = a - 0.35 + 0.18 * (vnoise(vec2(x * 28.0, gSeed)) - 0.5);   // ragged, not a straight seam
+    if (ww > 0.0) {
+        float boom = 0.030 * (gH / BIG) * env * smoothstep(0.0, 0.4, ww) * (1.0 - smoothstep(0.5, 2.2, ww));
+        float yImp = yc - 0.5 * gH * env;                       // where the lip lands
+        float yT = yc + boom * (0.6 + 0.8 * vnoise(vec2(x * 40.0, ww * 1.5)));
+        yT = mix(yImp, yT, smoothstep(0.0, 0.35, ww));          // the splash climbs up the face
+        float run = 1.0 - exp(-ww * 0.9);                       // fast at first, then slowing
+        float yB = mix(yImp, SEA - 0.07, run)
+                 - 0.010 * vnoise(vec2(x * 30.0, ww)) * run;
+        if (p.y < yT && p.y > yB - 0.002) {
+            float rel = clamp((p.y - yB) / max(yT - yB, 1e-3), 0.0, 1.0);   // 0 at the front
+            // Densest in a narrow band at the rushing front, lace behind it.
+            float lead = 1.0 - smoothstep(0.006, 0.030, p.y - yB);
+            float dens = mix(0.95, mix(0.95, 0.38, smoothstep(0.3, 1.4, ww)), 1.0 - lead);
+            dens *= 1.0 - 0.55 * smoothstep(1.2, 3.2, ww);                    // thins into lace
+            dens *= 1.0 - smoothstep(3.0, 4.6, ww);                           // and fades away
+            float front = smoothstep(yB - 0.002, yB + 0.002, p.y);
+            W = max(W, dens * front * edge);
         }
     }
+    float foam = foamMask(p, W, px);
+    if (foam > 0.0) {
+        float under = smoothstep(0.0, 0.05, yc - p.y);
+        vec3 fc = mix(FOAM, FOAM_SH, under * 0.6);
+        fc *= 0.88 + 0.12 * vnoise(p * 90.0);                    // lumpy, not a flat fill
+        rgb = mix(rgb, fc, foam * (0.62 + 0.30 * min(W * 1.4, 1.0)) * k);
+    }
 
-    // ---- spray: crisp droplets arc out of the breaking lip and fall ---------
-    if (s > 4.0 && s < 7.2 && abs(p.x - b.xc) < 0.5 && p.y < 0.36) {
+    // ---- spray: crisp droplets thrown up where the lip lands ------------------
+    float sp0 = gS - BREAK;
+    if (sp0 > 0.2 && sp0 < PEEL + 1.8 && p.y > SEA - 0.01) {
         float sp = 0.0;
         for (int j = 0; j < DROPS; j++) {
             float fj = float(j);
-            float hj = hash1(fj * 3.1 + seed);
-            float tb = 4.2 + 0.7 * hj;                           // staggered birth
-            float tau = s - tb;
-            if (tau < 0.0 || tau > 1.5) continue;
-            Big bt = bigAt(tb, xs, hm);
-            vec2 o = tipOf(bt) + vec2(0.04 * hash1(fj + seed * 2.0), 0.02);
-            vec2 v = vec2(-0.05 - 0.22 * hash1(fj * 5.3 + seed), 0.12 + 0.28 * hash1(fj * 7.7 + seed));
-            vec2 pos = o + v * tau + vec2(0.0, -0.45) * tau * tau;
-            float rad = (0.0028 + 0.0040 * hash1(fj * 9.1 + seed)) * (1.0 - tau / 1.6);
+            float hj = hash1(fj * 3.1 + gSeed);
+            float tj = BREAK + 0.35 + PEEL * hj;                 // when the peel passes its spot
+            float tau = gS - tj;
+            if (tau < 0.0 || tau > 1.3) continue;
+            float xj = gXr - gV * (tj - BREAK - 0.35) + 0.04 * (hash1(fj + gSeed * 2.0) - 0.5);
+            float ej = envelope(xj);
+            if (ej < 0.3) continue;
+            vec2 o = vec2(xj, SEA + 0.75 * gH * ej);
+            vec2 v = vec2(0.10 * (hash1(fj * 5.3 + gSeed) - 0.5), 0.10 + 0.24 * hash1(fj * 7.7 + gSeed));
+            vec2 pos = o + v * tau + vec2(0.0, -0.50) * tau * tau;
+            if (pos.y < SEA) continue;                           // fell back into the sea
+            float rad = max((0.0012 + 0.0032 * hash1(fj * 9.1 + gSeed)) * (1.0 - 0.4 * tau), 0.7 * px);
             float dd = length(p - pos) - rad;
-            sp = max(sp, smoothstep(px, -px, dd) * step(B0 - 0.02, pos.y));
+            sp = max(sp, smoothstep(0.8 * px, -0.8 * px, dd) * (1.0 - smoothstep(0.9, 1.3, tau)));
         }
-        rgb = mix(rgb, FOAM_COL, sp * 0.9 * k);
-    }
-
-    // ---- front row: deepest blue, closest to us ------------------------------
-    {
-        float d = rowD(p, 0.035, 0.032, 7.0, 2.0, 0.6);
-        float fill = smoothstep(0.8 * px, -0.8 * px, d);
-        float a = fill * mix(0.66, 0.40, smoothstep(0.0, 0.05, -d));
-        rgb = mix(rgb, NEAR_COL, a * k);
-        float l2 = 1.0 - smoothstep(0.4 * px, 1.2 * px, abs(d + 0.010));
-        rgb = mix(rgb, LINE_COL, l2 * fill * 0.22 * k);
-        // Whitecaps: a scalloped cap of foam on the tallest crests.
-        float t = iTime * ROLL;
-        float c = crest(7.0 * p.x + 2.0 * t + 0.6, 1.8);
-        float capT = 0.007 * smoothstep(0.75, 1.0, c) * (0.75 + 0.25 * sin(p.x * 420.0));
-        float cap = fill * smoothstep(-capT - px, -capT + px, d);
-        float line = 1.0 - smoothstep(0.6 * px, 1.6 * px, abs(d));
-        rgb = mix(rgb, LINE_COL, line * 0.7 * k);
-        rgb = mix(rgb, FOAM_COL, cap * 0.85 * k);
+        rgb = mix(rgb, FOAM, sp * 0.88 * k);
     }
 
     fragColor = vec4(rgb, base.a);

@@ -1,77 +1,102 @@
-// magiccircle — a luminous summoning circle on the ground at the lower right that charges up, sends up a column of light, and calms.
+// magiccircle — a finely engraved gold magic circle lying on the ground at the lower right; its rings turn and a bright pulse runs along the lines.
 // zh: 魔法阵
 // group: fantasy
-// Part of ghostty-bg. Additive only: it adds light on top and never moves
-// or distorts the text underneath.
+// Part of ghostty-bg. It only draws on top and never moves or distorts the
+// text underneath.
 
-const float INTENSITY = 0.75;   // overall brightness (0 = off)
-const float WIDTH     = 0.43;   // circle diameter, as a share of the window width
-const float TILT      = 0.34;   // how flat the ground makes it look (1 = seen from above)
-const float CYCLE     = 12.0;   // seconds per charge cycle
-const float DIM       = 0.30;   // resting glow between charges (never fully gone)
-const int   SPARKS    = 14;     // rising motes during the charge
-const float PI        = 3.14159265;
-const float TAU       = 6.28318531;
+const float INTENSITY = 0.90;   // overall strength (0 = off)
+const float WIDTH     = 0.40;   // circle diameter, as a share of the window width
+const float TILT      = 0.36;   // how flat it lies (1 = seen straight from above)
+const float PERSP     = 0.16;   // far side shrinks by this much (perspective)
+const float LINE_PX   = 1.25;   // engraved line width in pixels
+const float GLOW      = 0.22;   // tight halo along the lines (keep small)
+const float PULSE     = 8.0;    // seconds between energy pulses
+const int   SPARKS    = 12;     // small sparks rising from the circle
 
-float hash(float n) {
-    return fract(sin(n * 127.1) * 43758.5453);
-}
+const float PI  = 3.14159265;
+const float TAU = 6.28318531;
 
-mat2 rot(float a) {
+const vec3 GOLD  = vec3(0.93, 0.70, 0.36);   // polished gold at rest
+const vec3 HOT   = vec3(1.00, 0.93, 0.76);   // pale white-gold of the pulse
+
+float hash1(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+
+vec2 rot(vec2 v, float a) {
     float c = cos(a), s = sin(a);
-    return mat2(c, -s, s, c);
+    return vec2(c * v.x - s * v.y, s * v.x + c * v.y);
 }
 
-float segDist(vec2 p, vec2 a, vec2 b) {
+// Offset vector from p to the nearest point of segment a-b (z = position along it).
+vec3 segV(vec2 p, vec2 a, vec2 b) {
     vec2 pa = p - a, ba = b - a;
-    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return vec3(pa - ba * h, h);
 }
 
-// Star polygon {n/k} on radius R: n chords from vertex i to vertex i+k.
-float starPoly(vec2 g, int n, float k, float R) {
-    float d = 1e5;
-    float step_ = TAU / float(n);
-    for (int i = 0; i < 8; i++) {
-        if (i >= n) break;
-        float a0 = step_ * float(i);
-        float a1 = a0 + step_ * k;
-        d = min(d, segDist(g, R * vec2(cos(a0), sin(a0)), R * vec2(cos(a1), sin(a1))));
+// ---------------------------------------------------------------- perspective
+// The circle lives in flat "ground" coordinates g (radius 1). A true
+// perspective map keeps straight lines straight and turns circles into ellipses.
+// M holds the derivatives dg/dscreen so that any distance measured in g can be
+// turned into an exact on-screen pixel distance -> lines stay 1 px everywhere.
+vec4 M;          // (dx/dsx, dx/dsy, dy/dsy, pixels per screen unit)
+
+float px(vec2 v) {               // g-space offset -> distance in pixels
+    float l = length(v);
+    if (l < 1e-6) return 0.0;
+    vec2 n = v / l;
+    vec2 gs = vec2(M.x * n.x, M.y * n.x + M.z * n.y);
+    return l / max(length(gs), 1e-6) * M.w;
+}
+
+// Accumulators: crisp line ink (premultiplied), its coverage, and the halo.
+vec3 INK; float COV; vec3 HALO;
+
+// Draw one engraved stroke at pixel distance d; e = pulse energy 0..1+.
+void stroke(float d, float w, float e) {
+    float cov = clamp(w * 0.5 + 0.5 - d, 0.0, 1.0);          // ~1 px box AA
+    vec3 c = mix(GOLD, HOT, clamp(e, 0.0, 1.0));
+    float lum = 0.62 + 0.75 * e;
+    INK += c * cov * lum;
+    COV = max(COV, cov);
+    HALO += c * exp(-max(d, 0.0) * 0.55) * (GLOW * 0.35 + GLOW * 1.6 * e);
+}
+
+// Travelling pulse: s = position along a path (0..1), hp = head position.
+// Bright head, short fading tail behind it, nothing ahead of it.
+float runner(float s, float hp, float tail) {
+    float b = hp - s;
+    if (b < -0.01 || hp > 1.0 + 3.0 / tail) return 0.0;
+    return exp(-max(b, 0.0) * tail) * smoothstep(-0.01, 0.0, b);   // short soft-edged front
+}
+
+// A small sigil in a cell, q in about [-1,1]^2: three strokes picked from a
+// fixed set by the cell's hash, plus a ring on every fourth cell.
+vec2 sigilV(vec2 q, float id, out float best) {
+    vec2 bv = vec2(1e3);
+    best = 1e3;
+    for (int j = 0; j < 3; j++) {
+        int s = int(hash1(id * 3.17 + float(j) * 7.3) * 8.0);
+        if (j == 0) s = int(hash1(id) * 3.0);               // a main stem first
+        vec4 e = s == 0 ? vec4( 0.0, -0.9,  0.0,  0.9)
+               : s == 1 ? vec4(-0.6, -0.9,  0.6,  0.9)
+               : s == 2 ? vec4(-0.6,  0.9,  0.0, -0.9)
+               : s == 3 ? vec4(-0.6,  0.9,  0.6,  0.9)
+               : s == 4 ? vec4(-0.6, -0.9,  0.6, -0.9)
+               : s == 5 ? vec4( 0.0,  0.2,  0.6,  0.9)
+               : s == 6 ? vec4(-0.6,  0.0,  0.6,  0.0)
+               :          vec4( 0.0, -0.2, -0.6, -0.9);
+        vec2 v = segV(q, e.xy, e.zw).xy;
+        float l = dot(v, v);
+        if (l < best) { best = l; bv = v; }
     }
-    return d;
-}
-
-// A thin luminous line: a sharp core about a pixel wide plus a soft bloom.
-// d is already in screen units (window heights).
-float glowLine(float d) {
-    return exp(-d * d / 1.6e-6) + 0.30 * exp(-d / 0.0055);
-}
-
-// Lines "draw on" around the circle: a is this pixel's angle (0..1) along the
-// stroke, pr is how far the pen has got. Returns (drawn, pen-tip glint).
-vec2 reveal(float a, float pr) {
-    float drawn = smoothstep(a, a + 0.015, pr * 1.02);
-    float tip = exp(-pow((pr - a) * 30.0, 2.0)) * sin(PI * clamp(pr, 0.0, 1.0));
-    return vec2(drawn, tip);
-}
-
-// Small rune-like mark in a cell, q roughly in [-1,1]^2: a stem plus two
-// strokes picked from a short list by the cell's hash.
-float rune(vec2 q, float id) {
-    float d = segDist(q, vec2(0.0, -0.8), vec2(0.0, 0.8));
-    float h = hash(id * 3.7 + 1.3);
-    float h2 = hash(id * 5.1 + 7.9);
-    int s1 = int(h * 6.0), s2 = int(h2 * 6.0);
-    for (int j = 0; j < 2; j++) {
-        int s = j == 0 ? s1 : s2;
-        vec4 e = s == 0 ? vec4(-0.6, 0.8, 0.6, 0.8)
-               : s == 1 ? vec4(-0.6, -0.8, 0.6, -0.8)
-               : s == 2 ? vec4(0.0, 0.1, 0.6, 0.8)
-               : s == 3 ? vec4(0.0, -0.1, -0.6, -0.8)
-               : s == 4 ? vec4(-0.6, 0.0, 0.6, 0.0)
-               :          vec4(0.6, 0.8, 0.6, -0.3);
-        d = min(d, segDist(q, e.xy, e.zw));
+    if (mod(id, 4.0) < 0.5) {
+        vec2 c = vec2(0.0, 0.25);
+        vec2 r = q - c;
+        float lr = length(r);
+        vec2 v = lr > 1e-5 ? r / lr * (lr - 0.32) : vec2(0.32, 0.0);
+        if (dot(v, v) < best) { best = dot(v, v); bv = v; }
     }
-    return d;
+    return bv;
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
@@ -84,158 +109,181 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 p = vec2(uv.x * aspect, 1.0 - uv.y);
 
     float R = WIDTH * 0.5 * aspect;                    // radius in screen units
-    vec2 C = vec2(aspect - R - 0.05 * aspect, 0.20);   // lower right, on the "floor"
+    vec2 C = vec2(aspect - R - 0.04 * aspect, 0.19);   // lower right, on the floor
+    vec2 dp = p - C;
     float t = iTime;
 
-    // Quick bounding test: everything lives near the circle or in the column
-    // above it. Far pixels (the top-left text area) cost almost nothing.
-    vec2 dp = p - C;
-    if (abs(dp.x) > R * 1.6 || dp.y > 0.85 || dp.y < -R * TILT * 2.2) {
+    // Cheap rejection: only the ellipse and the air just above it are drawn,
+    // so the top-left text area costs nothing.
+    if (abs(dp.x) > R * 1.25 || dp.y < -R * TILT * 1.3 || dp.y > R * TILT * 1.3 + 0.40) {
         fragColor = base;
         return;
     }
 
-    // ---- Charge cycle ------------------------------------------------------
-    // 0-3 s pen draws the lines, brightness builds to a peak around 5-7 s with
-    // the column of light, then it calms back to the resting glow by ~11.5 s.
-    float ph = mod(t + 0.4, CYCLE);
-    float charge = smoothstep(0.2, 4.5, ph) * (1.0 - smoothstep(7.0, 11.5, ph));
-    float peak = smoothstep(3.5, 5.5, ph) * (1.0 - smoothstep(7.0, 10.0, ph));
-    float breathe = 0.92 + 0.08 * sin(t * 1.7);
+    // Inverse perspective: screen -> ground g.
+    vec2 u = dp / R;
+    float den = max(TILT - PERSP * u.y, 0.05);
+    float gy = u.y / den;
+    float w = 1.0 + PERSP * gy;
+    vec2 g = vec2(u.x * w, gy);
+    float dyds = TILT / (den * den);
+    M = vec4(w / R, u.x * PERSP * dyds / R, dyds / R, iResolution.y);
 
-    // Ground coordinates: squash vertically so the circle lies flat, and narrow
-    // the far side a little for perspective. In g the circle has radius 1.
-    vec2 g = dp / vec2(R, R * TILT);
-    g.x *= 1.0 + 0.14 * g.y;
+    INK = vec3(0.0); COV = 0.0; HALO = vec3(0.0);
+
+    float fade = smoothstep(0.0, 0.8, t);              // quick fade-in at start
+    float pt = mod(t - 1.0, PULSE);                    // pulse clock (first at t = 1 s)
     float r = length(g);
-    // Screen-space size of one g unit across a ring here, so lines keep a
-    // constant thin width whether they run along or across the tilt.
-    vec2 n = r > 1e-4 ? g / r : vec2(1.0, 0.0);
-    float k = R * length(vec2(n.x, n.y * TILT));
-    float aG = fract(atan(g.y, g.x) / TAU + 0.75);     // fixed angle, 0 at the front
+    vec2 n = r > 1e-5 ? g / r : vec2(1.0, 0.0);
+    float W = LINE_PX;
 
-    vec3 gold  = vec3(1.00, 0.74, 0.38);
-    vec3 amber = vec3(1.00, 0.52, 0.20);
-    vec3 cyan  = vec3(0.45, 0.85, 1.00);
-    vec3 col = vec3(0.0);
-
-    if (r < 1.18) {
+    if (r < 1.12) {
         // Each layer turns at its own speed, alternating direction.
-        vec2 gA = rot( t * 0.045) * g;   // outer rim and ticks
-        vec2 gB = rot(-t * 0.070) * g;   // rune band
-        vec2 gC = rot( t * 0.100) * g;   // heptagram
-        vec2 gD = rot(-t * 0.160) * g;   // hexagram and dotted ring
-        vec2 gE = rot( t * 0.240) * g;   // inner pentagram
-        float aA = atan(gA.y, gA.x), aB = atan(gB.y, gB.x), aD = atan(gD.y, gD.x);
+        float rA = t * 0.030, rB = -t * 0.050, rC = t * 0.075, rD = -t * 0.110, rE = t * 0.160;
+        // Angle of this pixel in each layer's frame, 0..1 starting at the front.
+        float a0 = atan(g.x, -g.y) / TAU;
+        float aA = fract(a0 - rA / TAU);
+        float aB = fract(a0 - rB / TAU);
+        float aD = fract(a0 - rD / TAU);
 
-        // Pen progress per layer: outer rings first, then inward.
-        float pr1 = clamp((ph - 0.3) / 1.6, 0.0, 1.0);
-        float pr2 = clamp((ph - 0.9) / 1.6, 0.0, 1.0);
-        float pr3 = clamp((ph - 1.5) / 1.6, 0.0, 1.0);
-        float pr4 = clamp((ph - 2.1) / 1.4, 0.0, 1.0);
-        vec2 rv1 = reveal(aG, pr1);
-        vec2 rv2 = reveal(1.0 - aG, pr2);   // drawn the other way round
-        vec2 rv3 = reveal(aG, pr3);
-        vec2 rv4 = reveal(1.0 - aG, pr4);
-
-        // Layer 1: outer double rim, ticks between, and three floating arcs.
-        float L1 = glowLine(abs(r - 1.0) * k) + 0.8 * glowLine(abs(r - 0.965) * k);
-        float tick = abs(fract(aA / TAU * 120.0) - 0.5) * (TAU * r / 120.0);
-        float longT = step(abs(fract(aA / TAU * 12.0 + 0.5) - 0.5), 0.004);
-        float tEnd = mix(0.984, 0.998, longT);       // every tenth tick reaches the rim
-        float tickBand = smoothstep(0.962, 0.968, r) * smoothstep(tEnd, tEnd - 0.004, r);
-        L1 += 0.7 * exp(-pow(tick * k / 0.0012, 2.0)) * tickBand;
-        float arcMask = smoothstep(0.30, 0.27, abs(fract(-aA / TAU * 3.0) - 0.5));
-        L1 += 0.55 * glowLine(abs(r - 1.07) * k) * arcMask;
-
-        // Layer 2: rune band between two rings.
-        float L2 = 0.8 * glowLine(abs(r - 0.94) * k) + 0.8 * glowLine(abs(r - 0.84) * k);
-        if (r > 0.845 && r < 0.935) {
-            float N = 40.0;
-            float cell = aB / TAU * N;
+        // ---- Outer rim: double ring, tick scale, three floating arcs.
+        float eRim = runner(aA, pt / 1.4, 7.0);
+        stroke(px(n * (r - 1.000)), W * 1.15, eRim);
+        stroke(px(n * (r - 0.965)), W, eRim);
+        {
+            float N = 96.0;
+            float cell = aA * N;
             float id = floor(cell);
-            vec2 q = vec2((fract(cell) - 0.5) * TAU * 0.89 / N, r - 0.89) / 0.030;
-            float d = mod(id, 5.0) < 0.5 ? abs(length(q) - 0.45) : rune(q, id);
-            L2 += 0.75 * glowLine(d * 0.030 * k);
+            float major = mod(id, 8.0) < 0.5 ? 1.0 : 0.0;
+            float tang = (fract(cell) - 0.5) / N * TAU * r;
+            float r1 = mix(0.988, 0.999, major);
+            float rad = r - clamp(r, 0.966, r1);
+            vec2 v = vec2(-n.y, n.x) * tang + n * rad;
+            stroke(px(v), W * 0.85, eRim);
+        }
+        if (r > 1.03) {
+            // Arcs with crisp end caps: distance to an arc segment.
+            float k = fract(aA * 3.0);                  // three arcs
+            float half_ = 0.36;
+            float off = abs(k - 0.5);
+            float along = max(off - half_, 0.0) / 3.0 * TAU * 1.07;
+            vec2 v = n * (r - 1.07) + vec2(-n.y, n.x) * along;
+            stroke(px(v), W, eRim * 0.8);
         }
 
-        // Layer 3: heptagram {7/3} touching the rune band's inner ring.
-        float L3 = 0.0;
-        if (r < 0.86) L3 = 0.75 * glowLine(starPoly(gC, 7, 3.0, 0.84) * k);
-
-        // Layer 4: inner ring, dotted ring and a hexagram, with a cyan tint.
-        float L4 = glowLine(abs(r - 0.60) * k) + 0.6 * glowLine(abs(r - 0.52) * k);
-        float dotA = (fract(aD / TAU * 48.0) - 0.5) * TAU * 0.56 / 48.0;
-        L4 += 0.9 * exp(-length(vec2(dotA, r - 0.56)) * k / 0.0016) * step(abs(r - 0.56), 0.03);
-        if (r < 0.54) L4 += 0.75 * glowLine(starPoly(gD, 6, 2.0, 0.52) * k);
-
-        // Layer 5: pentagram and core rings at the centre.
-        float L5 = 0.0;
-        if (r < 0.36) {
-            L5 += 0.8 * glowLine(abs(r - 0.33) * k) + 0.7 * glowLine(abs(r - 0.12) * k);
-            L5 += 0.7 * glowLine(starPoly(gE, 5, 2.0, 0.33) * k);
+        // ---- Sigil band between two rings; sigils light one after another.
+        float eBand = runner(aB, (pt - 0.6) / 1.6, 6.0);
+        stroke(px(n * (r - 0.925)), W, eBand);
+        stroke(px(n * (r - 0.775)), W, eBand);
+        if (r > 0.78 && r < 0.92) {
+            float N = 30.0;
+            float cell = aB * N;
+            float id = floor(cell);
+            float ti = 0.7 + id / N * 1.5;              // this sigil's moment
+            float eS = pt > ti ? exp(-(pt - ti) * 2.2) * 1.2 : 0.0;
+            float S = 0.050;                            // sigil half-size in g
+            vec2 q = vec2((fract(cell) - 0.5) / N * TAU * 0.85, 0.85 - r) / S;
+            q.x *= -1.0;
+            float bd;
+            vec2 v = sigilV(q, id, bd) * S;
+            vec2 vg = vec2(-n.y, n.x) * -v.x - n * v.y;
+            stroke(px(vg), W * 0.95, eS);
         }
 
-        // Brightness per layer: resting glow everywhere, plus the freshly drawn
-        // part at full charge, plus a bright glint at the pen tip.
-        float b1 = DIM + (1.0 - DIM) * charge * rv1.x + 1.6 * rv1.y;
-        float b2 = DIM + (1.0 - DIM) * charge * rv2.x + 1.6 * rv2.y;
-        float b3 = DIM + (1.0 - DIM) * charge * rv3.x + 1.6 * rv3.y;
-        float b4 = DIM + (1.0 - DIM) * charge * rv4.x + 1.6 * rv4.y;
-        float b5 = DIM + (1.0 - DIM) * charge * rv4.x;
+        // ---- Heptagram {7/3}: one continuous path, traced edge by edge.
+        if (r < 0.79) {
+            vec2 gC = rot(g, -rC);
+            float hp = (pt - 1.9) / 1.7;
+            float bd = 1e3; vec2 bv = vec2(1.0); float bs = 0.0;
+            for (int i = 0; i < 7; i++) {
+                float a1 = TAU * float(i * 3) / 7.0, a2 = TAU * float(i * 3 + 3) / 7.0;
+                vec3 sv = segV(gC, 0.775 * vec2(sin(a1), -cos(a1)), 0.775 * vec2(sin(a2), -cos(a2)));
+                float l = dot(sv.xy, sv.xy);
+                if (l < bd) { bd = l; bv = sv.xy; bs = (float(i) + sv.z) / 7.0; }
+            }
+            stroke(px(rot(bv, rC)), W, runner(bs, hp, 9.0));
+        }
 
-        // A soft highlight slowly chasing round the rim adds life even at rest.
-        float chase = 0.8 + 0.35 * pow(0.5 + 0.5 * cos(aG * TAU - t * 0.9), 6.0);
+        // ---- Inner rings with a dotted ring between them.
+        float eIn = runner(aD, (pt - 3.0) / 1.0, 5.0);
+        stroke(px(n * (r - 0.580)), W, eIn);
+        stroke(px(n * (r - 0.500)), W, eIn);
+        if (abs(r - 0.54) < 0.03) {
+            float N = 48.0;
+            float cell = aD * N;
+            vec2 v = vec2(-n.y, n.x) * (fract(cell) - 0.5) / N * TAU * r + n * (r - 0.54);
+            stroke(px(v) - 1.0, W, eIn);                // tiny round studs
+        }
 
-        col += gold  * L1 * b1 * chase;
-        col += mix(gold, amber, 0.35) * L2 * b2;
-        col += mix(gold, amber, 0.5) * L3 * b3;
-        col += mix(gold, cyan, 0.45) * L4 * b4;
-        col += mix(gold, cyan, 0.30) * L5 * b5 * (1.0 + 0.6 * peak);
-        col *= breathe;
+        // ---- Hexagram: two triangles traced together.
+        if (r < 0.51) {
+            vec2 gD = rot(g, -rD);
+            float hp = (pt - 3.4) / 0.9;
+            float bd = 1e3; vec2 bv = vec2(1.0); float bs = 0.0;
+            for (int i = 0; i < 6; i++) {
+                float j = float(i / 3), e = float(i - (i / 3) * 3);
+                float a1 = TAU * (e / 3.0 + j / 6.0), a2 = TAU * ((e + 1.0) / 3.0 + j / 6.0);
+                vec3 sv = segV(gD, 0.50 * vec2(sin(a1), -cos(a1)), 0.50 * vec2(sin(a2), -cos(a2)));
+                float l = dot(sv.xy, sv.xy);
+                if (l < bd) { bd = l; bv = sv.xy; bs = (e + sv.z) / 3.0; }
+            }
+            stroke(px(rot(bv, rD)), W, runner(bs, hp, 6.0));
+        }
+
+        // ---- Core: pentagram {5/2} in a ring, and a small central ring.
+        if (r < 0.30) {
+            vec2 gE = rot(g, -rE);
+            float hp = (pt - 4.2) / 0.8;
+            float bd = 1e3; vec2 bv = vec2(1.0); float bs = 0.0;
+            for (int i = 0; i < 5; i++) {
+                float a1 = TAU * float(i * 2) / 5.0, a2 = TAU * float(i * 2 + 2) / 5.0;
+                vec3 sv = segV(gE, 0.25 * vec2(sin(a1), -cos(a1)), 0.25 * vec2(sin(a2), -cos(a2)));
+                float l = dot(sv.xy, sv.xy);
+                if (l < bd) { bd = l; bv = sv.xy; bs = (float(i) + sv.z) / 5.0; }
+            }
+            float eCore = 0.75 * exp(-pow((pt - 5.1) * 2.2, 2.0));   // brief flash when the pulse arrives
+            stroke(px(rot(bv, rE)), W, runner(bs, hp, 6.0) + eCore);
+            stroke(px(n * (r - 0.270)), W, eCore + runner(fract(a0), (pt - 4.2) / 0.8, 5.0));
+            stroke(px(n * (r - 0.085)), W, eCore);
+        }
     }
 
-    // ---- Light spilling onto the ground -----------------------------------
-    float spill = exp(-max(r - 0.2, 0.0) * 2.4) * (0.08 + 0.30 * charge + 0.25 * peak);
-    col += mix(amber, gold, smoothstep(1.2, 0.0, r)) * spill;
-    // A faint cyan pool at the very centre when it peaks.
-    col += cyan * exp(-r * r * 9.0) * 0.25 * peak;
-
-    // ---- Column of light rising from the centre ---------------------------
-    float h = dp.y;                                    // height above the centre
-    if (abs(dp.x) < R * 1.1 && h > -0.06) {
-        float w = R * (0.34 + 0.14 * smoothstep(0.0, 0.6, h));   // flares slightly upward
-        float body = exp(-pow(dp.x / w, 2.0));
-        float core = exp(-pow(dp.x / (w * 0.18), 2.0));
-        float halo = exp(-pow(dp.x / (w * 2.2), 2.0));      // wide faint haze
-        // Fine vertical shimmer drifting upward inside the beam.
-        float shimmer = 0.75 + 0.25 * sin(dp.x * 140.0 + sin(h * 9.0 - t * 2.0) * 1.5)
-                                     * sin(h * 7.0 - t * 2.6);
-        float fade = smoothstep(-0.05, 0.03, h) * exp(-max(h, 0.0) * 2.4) * smoothstep(0.82, 0.45, h);
-        float beam = (0.30 * body * shimmer + 0.50 * core + 0.10 * halo) * fade;
-        vec3 beamCol = mix(cyan * 0.9, vec3(1.0, 0.92, 0.75), core);
-        col += beamCol * beam * (0.06 * charge + 0.94 * peak);
-
-        // Rising sparks: born inside the circle, drift up and fade.
-        float amt = 0.15 + 0.5 * charge + 0.6 * peak;
+    // ---- Sparks: tiny crisp points rising from the circle -----------------
+    vec3 SP = vec3(0.0); float spA = 0.0;
+    if (dp.y > -R * TILT * 1.2) {
+        float burst = exp(-pow((pt - 5.3) * 0.9, 2.0));   // more sparks after a pulse
         for (int i = 0; i < SPARKS; i++) {
             float fi = float(i);
-            float life = 2.6 + 1.8 * hash(fi + 0.3);
-            float lt = fract(t / life + hash(fi + 4.1));
-            float ang = TAU * hash(fi + 8.7);
-            float rad = 0.65 * sqrt(hash(fi + 2.9));
-            vec2 start = vec2(cos(ang) * rad * R, sin(ang) * rad * R * TILT);
-            vec2 sp = start + vec2(0.012 * sin(lt * 5.0 + fi), lt * (0.30 + 0.25 * hash(fi + 6.2)));
-            vec2 dd = dp - sp;
-            dd.y *= 0.45;                              // slight vertical streak
-            float s = exp(-dot(dd, dd) / 1.0e-5) * sin(PI * lt);
-            col += mix(gold, cyan, hash(fi + 1.7) * 0.6) * s * amt;
+            float life = 2.2 + 1.6 * hash1(fi + 0.3);
+            float lt = fract(t / life + hash1(fi + 4.1));
+            float cyc = floor(t / life + hash1(fi + 4.1));
+            float ang = TAU * hash1(fi * 1.7 + cyc * 3.1);
+            float rad = mix(0.45, 1.0, hash1(fi * 2.3 + cyc * 1.3));
+            vec2 gs = rad * vec2(sin(ang), -cos(ang));
+            // forward perspective: ground -> screen
+            float ws = 1.0 + PERSP * gs.y;
+            vec2 s0 = R * vec2(gs.x / ws, TILT * gs.y / ws);
+            float rise = lt * (0.10 + 0.14 * hash1(fi + 6.2));
+            vec2 sp = s0 + vec2(0.004 * sin(lt * 6.0 + fi), rise);
+            vec2 d = dp - sp;
+            // Short streak below the point (motion), crisp round head.
+            float dh = length(d) * iResolution.y;
+            float ds = length(segV(dp, sp, sp - vec2(0.0, 0.014)).xy) * iResolution.y;
+            float life_ = smoothstep(0.0, 0.08, lt) * (1.0 - smoothstep(0.55, 1.0, lt));
+            float amt = life_ * (0.55 + 0.6 * burst);
+            float head = clamp(1.3 - dh, 0.0, 1.0);
+            float streak = clamp(0.9 - ds, 0.0, 1.0) * 0.45 * clamp(1.0 + d.y / 0.014, 0.0, 1.0);
+            float k = max(head, streak) * amt;
+            SP += mix(HOT, GOLD, hash1(fi + 1.7) * 0.6) * k * 1.2 + GOLD * exp(-dh * 0.5) * 0.15 * amt;
+            spA = max(spA, k);
         }
     }
 
-    // Soft roll-off keeps bright overlaps luminous rather than clipped, and
-    // caps opacity so the text behind stays readable.
-    col *= INTENSITY;
-    col = 0.85 * (1.0 - exp(-col * 1.4));
-    fragColor = vec4(base.rgb + col, base.a);
+    // Engraved lines are laid over the picture (opaque-ish ink), the halo is added.
+    float a = clamp(COV, 0.0, 1.0) * 0.85 * INTENSITY * fade;
+    vec3 ink = INK / max(COV, 1e-3);
+    vec3 col = base.rgb * (1.0 - a) + min(ink, vec3(1.3)) * a;
+    col += HALO * INTENSITY * fade;
+    col += SP * INTENSITY * fade;
+    fragColor = vec4(col, base.a);
 }
