@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="1.17.0"
+VERSION="1.17.1"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -341,7 +341,7 @@ fx_browse() {
     local edge=$'\033[0;48;5;236;38;5;240m' hi=$'\033[0;1;48;5;73;38;5;234m'
     local bold=$'\033[0;1;48;5;236;38;5;255m' acc=$'\033[0;48;5;236;38;5;80m'
     # stty reads the real window size; tput inside $(...) sees a pipe and says 80.
-    cols="$(stty size </dev/tty 2>/dev/null | cut -d' ' -f2)"
+    cols="$({ stty size </dev/tty | cut -d' ' -f2; } 2>/dev/null || true)"
     [[ "$cols" =~ ^[0-9]+$ ]] && (( cols >= 20 )) || cols=80
     W=88; (( W <= cols - 2 )) || W=$(( cols - 2 ))
     (( W >= 40 )) || W=40
@@ -1189,10 +1189,131 @@ cmd_rm() {
   if (( failed > 0 )); then exit 1; fi
 }
 
+# The bgm card, in the same style as the bgf browser. Each row is drawn as an
+# empty card row first, then every piece is placed at an absolute column
+# (ESC [ n G), so wide Chinese text needs no width maths.
+# $1 width, $2 state (show / hidden / none / uninit), $3 image name,
+# $4 opacity, $5 images in the library, $6 effect ("" = none).
+menu_card() {
+  local W="$1" cw line
+  local card=$'\033[0;48;5;236;38;5;252m' dim=$'\033[0;48;5;236;38;5;244m'
+  local edge=$'\033[0;48;5;236;38;5;240m' cmdc=$'\033[0;1;48;5;236;38;5;80m'
+  local head=$'\033[0;48;5;236;38;5;73m' bold=$'\033[0;1;48;5;236;38;5;255m'
+  line="$(printf '%*s' $(( W - 2 )) '' | sed 's/ /─/g')"
+  cw=$(( (W - 14) / 3 ))
+
+  rule()  { printf '  %s%s%s%s\033[0m\n' "$edge" "$1" "$line" "$2"; }
+  blank() { printf '  %s│%s%*s%s│' "$edge" "$card" $(( W - 2 )) '' "$edge"; }
+  col()   { printf '\033[%dG' "$(( 3 + $1 ))"; }
+  # A row of commands: a section label, then up to three "command description"
+  # cells. A command starting with "+" may run across the whole row.
+  cells() {
+    local label="$1" i=0 c d
+    shift
+    blank; col 2; printf '%s%s' "$head" "$label"
+    while (( $# >= 2 )); do
+      c="$1"; d="$2"; shift 2
+      if [[ -n "$c" ]]; then
+        col $(( 12 + i * cw )); printf '%s%s %s%s' "$cmdc" "${c#+}" "$card" "$d"
+      fi
+      i=$(( i + 1 ))
+    done
+    printf '\033[0m\n'
+  }
+  gap() { blank; printf '\033[0m\n'; }
+  # The memo: letters in the command colour, their words dim.
+  memo() {
+    local pair
+    blank; col 12
+    for pair in "$@"; do printf '%s%s %s%s   ' "$cmdc" "${pair%%=*}" "$dim" "${pair#*=}"; done
+    printf '\033[0m\n'
+  }
+
+  # Top edge with the title.
+  printf '  %s╭─ %sghostty-bg %s%s %s' "$edge" "$head" "$dim" "$VERSION" "$edge"
+  printf '%*s' $(( W - 16 - ${#VERSION} )) '' | sed 's/ /─/g'
+  printf '╮\033[0m\n'
+
+  # Status: what is showing, opacity, library size, effect.
+  blank; col 2
+  case "$2" in
+    show)   printf '%s● %s%s' "$cmdc" "$bold" "$3" ;;
+    hidden) printf '%s○ %s%s' "$dim" "$card" "$(msg "hidden ($3)" "已隐藏（$3）")" ;;
+    none)   printf '%s○ %s' "$dim" "$(msg 'no image' '没有背景图')" ;;
+    *)      printf '%s%s\033[0m\n' "$bold" "$(msg 'not set up yet — run: bgs init' '还没设置——请先运行：bgs init')"
+            rule '╰' '╯'; return ;;
+  esac
+  printf '   %s%s %s%s' "$dim" "$(msg opacity 浓度)" "$card" "$4"
+  printf '   %s%s %s%s' "$dim" "$(msg library 图库)" "$card" "$(msg "$5 images" "$5 张")"
+  if [[ -n "$6" ]]; then printf '   %s%s %s%s' "$dim" "$(msg effect 特效)" "$card" "$6"
+  else printf '   %s%s' "$dim" "$(msg 'no effect' '没开特效')"; fi
+  printf '\033[0m\n'
+  rule '├' '┤'
+
+  if [[ "$UI_LANG" == zh ]]; then
+    cells 换图 bgn 下一张 bgp 上一张 bgr 随机一张
+    cells "" bgs '挑一张（fzf）' bga 自动轮播 bgv 欣赏模式
+    gap
+    cells 外观 bg+ 浓一点 bg- 淡一点 bgh '隐藏 / 显示'
+    cells "" +bgf '特效 72 种：直接敲 bgf 用方向键挑 · bgf list 列出 · bgf off 关'
+    gap
+    cells 图库 'bgs add' 加图或文件夹 bgd 删掉当前这张 'bgs rm' 按名字删
+    cells "" 'bgs list' 列出全部
+    gap
+    cells 其他 bgw 文件在哪 bgm 这个菜单 'bgs help' 完整帮助
+    rule '├' '┤'
+    blank; col 2; printf '%s速记' "$head"; col 12; printf '%sbg = background，再加一个字母\033[0m\n' "$card"
+    memo n=next p=previous r=random s=select h=hide d=delete
+    memo w=where m=menu a=auto f=effects v=view +=浓 -=淡
+  else
+    cells switch bgn next bgp previous bgr random
+    cells "" bgs 'pick (fzf)' bga slideshow bgv 'viewing mode'
+    gap
+    cells look bg+ stronger bg- fainter bgh 'hide / show'
+    cells "" +bgf 'effects, 72 of them: plain bgf to browse · bgf list · bgf off'
+    gap
+    cells library 'bgs add' 'add images' bgd 'delete current' 'bgs rm' 'remove by name'
+    cells "" 'bgs list' 'list them all'
+    gap
+    cells more bgw where bgm 'this menu' 'bgs help' 'full help'
+    rule '├' '┤'
+    blank; col 2; printf '%smemo' "$head"; col 12; printf '%sbg = background, plus one letter\033[0m\n' "$card"
+    memo n=next p=previous r=random s=select h=hide d=delete
+    memo w=where m=menu a=auto f=effects v=view +=stronger -=fainter
+  fi
+  rule '╰' '╯'
+}
+
 # bgm: one-screen menu of the short commands, with the current state on top.
+# A card on a wide terminal; plain text in a pipe or a narrow window.
 cmd_menu() {
   local cur hid count state
   count=0
+
+  # On a wide enough terminal: the card. Otherwise (a pipe, a narrow window): plain text.
+  local cols
+  cols="$({ stty size </dev/tty | cut -d' ' -f2; } 2>/dev/null || true)"
+  if [[ -t 1 && "$cols" =~ ^[0-9]+$ ]] && (( cols >= 84 )); then
+    local W=88 kind=uninit name="" fx="" f
+    (( W <= cols - 4 )) || W=$(( cols - 4 ))
+    if is_initialized; then
+      cur="$(current_image)"; hid="$(hidden_image)"
+      count="$(list_images | grep -c . || true)"
+      if [[ -n "$cur" ]]; then kind=show; name="$(basename "$cur")"
+      elif [[ -n "$hid" ]]; then kind=hidden; name="$(basename "$hid")"
+      else kind=none; fi
+      f="$(managed_fx)"
+      if [[ -n "$f" && -f "$f" ]]; then
+        fx="$(fx_name "$f")"
+        [[ "$UI_LANG" == zh ]] && fx="$fx $(fx_label "$f")"
+      fi
+      # Long file names would run past the right edge.
+      (( ${#name} <= 34 )) || name="${name:0:31}..."
+    fi
+    menu_card "$W" "$kind" "$name" "$(is_initialized && effective_opacity)" "$count" "$fx"
+    return
+  fi
+
   if is_initialized; then
     cur="$(current_image)"; hid="$(hidden_image)"
     count="$(list_images | grep -c . || true)"
