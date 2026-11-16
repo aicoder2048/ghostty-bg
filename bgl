@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# bgl — shortcut for `ghostty-bg profile`: switch between image libraries (work, life...).
+exec ghostty-bg profile "$@"

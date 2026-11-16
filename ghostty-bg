@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="1.22.0"
+VERSION="1.23.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -78,8 +78,38 @@ find_config() {
 
 CONFIG_FILE="$(find_config)"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
-LIB_DIR="$CONFIG_DIR/backgrounds"
 BG_CONF="$CONFIG_DIR/$INCLUDE_NAME"
+
+# ---------- profiles ----------
+
+# A profile is a separate image library (work, life...): a folder inside
+# backgrounds/. The default profile is backgrounds/ itself, so a library from
+# before profiles existed keeps working as it is. backgrounds/.profile holds the
+# active profile's name (no file = default). Every library command (next, add,
+# rm, list, play...) only looks at $LIB_DIR, the active profile's folder.
+ROOT_LIB="$CONFIG_DIR/backgrounds"
+PROFILE_FILE="$ROOT_LIB/.profile"
+DEFAULT_PROFILE="default"
+
+# $1 can be used as the name of a (non-default) profile folder.
+valid_profile_name() {
+  [[ -n "$1" && "$1" != .* && "$1" != */* && "$1" != *[[:space:]]* && ${#1} -le 40 ]] || return 1
+  case "$1" in default|list|ls|rm|remove|delete) return 1 ;; esac
+}
+
+# The active profile; default if the file is missing, odd, or its folder is gone.
+active_profile() {
+  local p=""
+  if [[ -f "$PROFILE_FILE" ]]; then p="$(head -1 "$PROFILE_FILE")"; fi
+  if valid_profile_name "$p" && [[ -d "$ROOT_LIB/$p" ]]; then echo "$p"; else echo "$DEFAULT_PROFILE"; fi
+}
+
+profile_dir() {
+  if [[ "$1" == "$DEFAULT_PROFILE" ]]; then echo "$ROOT_LIB"; else echo "$ROOT_LIB/$1"; fi
+}
+
+PROFILE="$(active_profile)"
+LIB_DIR="$(profile_dir "$PROFILE")"
 
 is_initialized() {
   [[ -f "$CONFIG_FILE" ]] && grep -qE "$INCLUDE_RE" "$CONFIG_FILE"
@@ -894,14 +924,18 @@ set_image() {
 }
 
 empty_library() {
-  die "the library is empty — add one with: bgs add <image>" \
-      "图库是空的——先加一张：bgs add <图片>"
+  if [[ "$PROFILE" == "$DEFAULT_PROFILE" ]]; then
+    die "the library is empty — add one with: bgs add <image>" \
+        "图库是空的——先加一张：bgs add <图片>"
+  fi
+  die "profile $PROFILE is empty — add one with: bgs add <image>, or switch with: bgl" \
+      "profile $PROFILE 是空的——先加一张：bgs add <图片>，或者用 bgl 换一个 profile"
 }
 
 # ---------- commands ----------
 
 cmd_init() {
-  mkdir -p "$CONFIG_DIR" "$LIB_DIR"
+  mkdir -p "$CONFIG_DIR" "$ROOT_LIB"
   [[ -f "$BG_CONF" ]] || write_include "" ""
 
   if is_initialized; then
@@ -1507,11 +1541,122 @@ cmd_rm() {
   if (( failed > 0 )); then exit 1; fi
 }
 
+# ---------- profile commands (bgl) ----------
+
+# Profile names, default first.
+list_profiles() {
+  local d name
+  echo "$DEFAULT_PROFILE"
+  [[ -d "$ROOT_LIB" ]] || return 0
+  while IFS= read -r d; do
+    name="$(basename "$d")"
+    if valid_profile_name "$name"; then echo "$name"; fi
+  done < <(find "$ROOT_LIB" -mindepth 1 -maxdepth 1 -type d | sort)
+}
+
+profile_count() {
+  LIB_DIR="$(profile_dir "$1")" list_images | grep -c . || true
+}
+
+# One line per profile: "* name  (n images)", * = active.
+profile_list() {
+  local p mark
+  while IFS= read -r p; do
+    if [[ "$p" == "$PROFILE" ]]; then mark='*'; else mark=' '; fi
+    printf '%s %-16s %s\n' "$mark" "$p" "$(msg "$(profile_count "$p") images" "$(profile_count "$p") 张")"
+  done < <(list_profiles)
+}
+
+profile_pick() {
+  local choice prompt
+  prompt="$(msg 'profile> ' 'profile> ')"
+  choice="$(profile_list | fzf --prompt="$prompt" --no-sort --height=~50% --reverse)" || exit 0
+  profile_switch "$(awk '{ print $2 }' <<< "${choice:1}")"
+}
+
+# Switch to profile $1 (created if missing) and show its image: the one it was
+# on last time, else its first. An empty profile leaves the background as it is.
+profile_switch() {
+  local name="$1" dir img="" last=""
+  if [[ "$name" != "$DEFAULT_PROFILE" ]] && ! valid_profile_name "$name"; then
+    die "not a usable profile name: $name   (letters, digits, - _ . ; no spaces or /)" \
+        "这个名字不能用作 profile：$name   （不能有空格或 /，不能以 . 开头）"
+  fi
+  dir="$(profile_dir "$name")"
+
+  # Remember the image of the profile we are leaving, to come back to it.
+  img="$(current_image)"; [[ -n "$img" ]] || img="$(hidden_image)"
+  if [[ -n "$img" && "$(dirname "$img")" == "$LIB_DIR" && -d "$LIB_DIR" ]]; then
+    basename "$img" > "$LIB_DIR/.last"
+  fi
+
+  if [[ ! -d "$dir" ]]; then
+    mkdir -p "$dir"
+    msg "Created profile: $name" "新建了 profile：$name"
+  fi
+  if [[ "$name" == "$DEFAULT_PROFILE" ]]; then rm -f "$PROFILE_FILE"; else echo "$name" > "$PROFILE_FILE"; fi
+  PROFILE="$name"
+  LIB_DIR="$dir"
+  msg "Profile: $name  ($(profile_count "$name") images)" "当前 profile：${name}（$(profile_count "$name") 张）"
+
+  if [[ -f "$dir/.last" ]]; then last="$(head -1 "$dir/.last")"; fi
+  if [[ -n "$last" && -f "$dir/$last" ]]; then img="$dir/$last"; else img="$(list_images | head -1)"; fi
+  if [[ -z "$img" ]]; then
+    msg "It is empty — add images with: bgs add <image or folder>" \
+        "里面还没有图——加图：bgs add <图片或文件夹>"
+  elif [[ -z "$(current_image)" && -n "$(hidden_image)" ]]; then
+    write_include "" "$(managed_opacity)" "$img"     # hidden stays hidden; bgh shows this one
+  else
+    set_image "$img"
+  fi
+}
+
+# Move a profile folder (with its images) to the Trash. Removing the active one
+# switches back to the default profile first.
+profile_rm() {
+  local name="${1:-}" dir n cur
+  [[ -n "$name" ]] || die "usage: bgl rm <profile>   (see: bgl list)" "用法：bgl rm <profile>   （见 bgl list）"
+  [[ "$name" != "$DEFAULT_PROFILE" ]] ||
+    die "the default profile cannot be removed (use bgs rm to remove its images)." \
+        "默认 profile 不能删（要删里面的图用 bgs rm）。"
+  dir="$ROOT_LIB/$name"
+  if ! valid_profile_name "$name" || [[ ! -d "$dir" ]]; then
+    die "no such profile: $name   (see: bgl list)" "没有这个 profile：$name   （见 bgl list）"
+  fi
+  n="$(profile_count "$name")"
+  [[ "$name" != "$PROFILE" ]] || profile_switch "$DEFAULT_PROFILE"
+
+  # The background must not keep pointing into the removed folder.
+  cur="$(current_image)"
+  if [[ "$(dirname "$cur")" == "$dir" ]]; then
+    write_include "" "$(managed_opacity)"
+    reload_ghostty
+    msg "(The background image was in that profile, so it is off now.)" "（当前背景图在这个 profile 里，已关闭。）"
+  elif [[ "$(dirname "$(hidden_image)")" == "$dir" ]]; then
+    write_include "" "$(managed_opacity)"
+  fi
+
+  to_trash "$dir" || die "could not remove: $dir" "删除失败：$dir"
+  msg "Moved profile $name to the Trash ($n images)." "已把 profile $name 移到废纸篓（$n 张）。"
+}
+
+# bgl / bgs profile [name | list | rm <name>]
+cmd_profile() {
+  require_init
+  case "${1:-}" in
+    "")
+      if [[ -t 0 && -t 1 ]] && command -v fzf >/dev/null; then profile_pick; else profile_list; fi ;;
+    list|ls)          profile_list ;;
+    rm|remove|delete) shift; profile_rm "${1:-}" ;;
+    *)                profile_switch "$1" ;;
+  esac
+}
+
 # The bgm card, in the same style as the bgf browser. Each row is drawn as an
 # empty card row first, then every piece is placed at an absolute column
 # (ESC [ n G), so wide Chinese text needs no width maths.
 # $1 width, $2 state (show / hidden / none / uninit), $3 image name,
-# $4 opacity, $5 images in the library, $6 effect ("" = none).
+# $4 opacity, $5 images in the library, $6 effect ("" = none), $7 profile.
 menu_card() {
   local W="$1" cw line
   local card=$'\033[0;48;5;236;38;5;252m' dim=$'\033[0;48;5;236;38;5;244m'
@@ -1562,7 +1707,10 @@ menu_card() {
             rule '╰' '╯'; return ;;
   esac
   printf '   %s%s %s%s' "$dim" "$(msg opacity 浓度)" "$card" "$4"
-  printf '   %s%s %s%s' "$dim" "$(msg library 图库)" "$card" "$(msg "$5 images" "$5 张")"
+  local lib
+  lib="$(msg "$5 images" "$5 张")"
+  [[ "${7:-$DEFAULT_PROFILE}" == "$DEFAULT_PROFILE" ]] || lib="$7 · $lib"
+  printf '   %s%s %s%s' "$dim" "$(msg library 图库)" "$card" "$lib"
   if [[ -n "$6" ]]; then printf '   %s%s %s%s' "$dim" "$(msg effect 特效)" "$card" "$6"
   else printf '   %s%s' "$dim" "$(msg 'no effect' '没开特效')"; fi
   printf '\033[0m\n'
@@ -1578,12 +1726,14 @@ menu_card() {
     gap
     cells 图库 'bgs add' 加图或文件夹 bgd 删掉当前这张 'bgs rm' 按名字删
     cells "" 'bgs list' 列出全部
+    cells "" +bgl '分组图库 profile：直接敲 bgl 挑 · bgl work 切换 · bgl rm 删'
     gap
     cells 其他 bgw 文件在哪 bgm 这个菜单 'bgs help' 完整帮助
     rule '├' '┤'
     blank; col 2; printf '%s速记' "$head"; col 12; printf '%sbg = background，再加一个字母\033[0m\n' "$card"
     memo n=next p=previous r=random s=select h=hide d=delete
-    memo w=where m=menu a=auto f=effects v=view t=theme +=浓 -=淡
+    memo w=where m=menu a=auto f=effects v=view t=theme l=library
+    memo +=浓 -=淡
   else
     cells switch bgn next bgp previous bgr random
     cells "" bgs 'pick (fzf)' bga slideshow bgv 'viewing mode'
@@ -1594,12 +1744,13 @@ menu_card() {
     gap
     cells library 'bgs add' 'add images' bgd 'delete current' 'bgs rm' 'remove by name'
     cells "" 'bgs list' 'list them all'
+    cells "" +bgl 'profiles: plain bgl to pick · bgl work to switch · bgl rm'
     gap
     cells more bgw where bgm 'this menu' 'bgs help' 'full help'
     rule '├' '┤'
     blank; col 2; printf '%smemo' "$head"; col 12; printf '%sbg = background, plus one letter\033[0m\n' "$card"
     memo n=next p=previous r=random s=select h=hide d=delete
-    memo w=where m=menu a=auto f=effects v=view t=theme
+    memo w=where m=menu a=auto f=effects v=view t=theme l=library
     memo +=stronger -=fainter
   fi
   rule '╰' '╯'
@@ -1631,7 +1782,7 @@ cmd_menu() {
       # Long file names would run past the right edge.
       (( ${#name} <= 34 )) || name="${name:0:31}..."
     fi
-    menu_card "$W" "$kind" "$name" "$(is_initialized && effective_opacity)" "$count" "$fx"
+    menu_card "$W" "$kind" "$name" "$(is_initialized && effective_opacity)" "$count" "$fx" "$PROFILE"
     return
   fi
 
@@ -1648,8 +1799,10 @@ cmd_menu() {
     local fx="" fxname
     fxname="$(managed_fx)"
     if [[ -n "$fxname" ]]; then fx="$(msg " · effect $(fx_name "$fxname")" " · 特效 $(fx_name "$fxname")")"; fi
-    msg "ghostty-bg · $state · opacity $(effective_opacity) · $count in library$fx" \
-        "ghostty-bg · $state · 浓度 $(effective_opacity) · 图库 $count 张$fx"
+    local prof=""
+    [[ "$PROFILE" == "$DEFAULT_PROFILE" ]] || prof="$PROFILE · "
+    msg "ghostty-bg · $state · opacity $(effective_opacity) · $prof$count in library$fx" \
+        "ghostty-bg · $state · 浓度 $(effective_opacity) · 图库 $prof$count 张$fx"
   else
     msg "ghostty-bg · not set up yet — run: bgs init" "ghostty-bg · 还没设置——请先运行：bgs init"
   fi
@@ -1664,12 +1817,13 @@ cmd_menu() {
          bgt  配色主题（bgt 搜索着挑，bgt here 只改这个 Tab，bgt reset 恢复）
   图库   bgs add <图或文件夹>   加图        bgd  删掉当前这张
          bgs rm <名字>          删图        bgs list  列出
+         bgl  分组图库 profile（bgl work 切换，bgl list 列出，bgl rm 删）
   其他   bgw  文件在哪    bgm  这个菜单    bgs help  完整帮助
 
   速记：bg = background，再加一个字母
         n next · p previous · r random · s select
         h hide · d delete · w where · m menu · a auto · f effects
-        v view · t theme · + 浓 · - 淡
+        v view · t theme · l library · + 浓 · - 淡
 EOF
   else
     cat <<'EOF'
@@ -1681,12 +1835,13 @@ EOF
            bgt  colour theme (bgt to search and pick, bgt here for this tab only, bgt reset)
   library  bgs add <image or folder>  add   bgd  delete current
            bgs rm <name>              remove      bgs list  list
+           bgl  profiles: separate libraries (bgl work, bgl list, bgl rm)
   more     bgw  where       bgm  this menu   bgs help  full help
 
   memo: bg = background, plus one letter
         n next · p previous · r random · s select
         h hide · d delete · w where · m menu · a auto · f effects
-        v view · t theme · + stronger · - fainter
+        v view · t theme · l library · + stronger · - fainter
 EOF
   fi
 }
@@ -1699,6 +1854,7 @@ cmd_where() {
     state="$(msg ' (not set up — run: ghostty-bg init)' '（未设置——请运行：ghostty-bg init）')"
   fi
   msg "config file : $CONFIG_FILE$state" "配置文件：$CONFIG_FILE$state"
+  msg "profile     : $PROFILE"             "当前 profile：$PROFILE"
   msg "image folder: $LIB_DIR"            "图库目录：$LIB_DIR"
   msg "managed file: $BG_CONF"            "背景文件：$BG_CONF"
 }
@@ -1725,10 +1881,13 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
                     光标移到哪个终端就换成哪个，回车保留，Esc 恢复；all 浏览全部；list 列出；random 随机；reset 恢复成你自己配置里的
                     bgs theme here [名字] 只改当前这个 Tab（不改配置、不影响别的 Tab，关掉 Tab 就没了）；here reset 恢复成全局主题
   bgs rm <名字>     把图库里的图移到废纸篓（不写名字就用 fzf 多选；原图不受影响）
+  bgs profile [名字] 分组图库：每个 profile 是一套独立的图（工作、生活……），换图、加图、删图都只在当前 profile 里。
+                    不写名字就用 fzf 挑；写名字就切过去（没有就新建），回到上次看的那张；default 是原来的默认图库
+                    list 列出各 profile 和张数；rm <名字> 把整个 profile 移到废纸篓（= bgl）
   bgs opacity       查看背景图浓度；bgs opacity 0.3 设成 0.3；+ / - 每次加减 0.05
   bgs where         显示用到的配置文件和图库位置（= bgw）
 
-快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgh = 隐藏/显示，bgw = 文件在哪，bgd = 删掉当前这张，bgm = 命令菜单，bga = 自动轮播，bgf = 特效，bgv = 欣赏模式，bgt = 主题
+快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgh = 隐藏/显示，bgw = 文件在哪，bgd = 删掉当前这张，bgm = 命令菜单，bga = 自动轮播，bgf = 特效，bgv = 欣赏模式，bgt = 主题，bgl = 分组图库
 
 缩写怎么来的：bg = background（背景），后面一个字母是动作
   bgs  s = select    挑图          bgn  n = next      下一张
@@ -1737,6 +1896,7 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgw  w = where     文件在哪      bgm  m = menu      命令菜单
   bga  a = auto      自动轮播          bgf  f = effects   动态特效
   bgv  v = view      欣赏模式          bgt  t = theme     配色主题
+  bgl  l = library   分组图库
   bg+  + = more      浓一点        bg-  - = less      淡一点
 
 语言：GHOSTTY_BG_LANG=zh 或 en（默认跟随 LANG）
@@ -1764,10 +1924,13 @@ Usage (bgs and ghostty-bg are the same command):
                     list, random; reset goes back to the theme in your own config
                     bgs theme here [name] only this tab (no config change, other tabs untouched, gone when the tab closes); here reset
   bgs rm <name>     move library images to the Trash (no name: pick with fzf; originals untouched)
+  bgs profile [name] profiles: separate image libraries (work, life...); next / add / rm / play only see the active one.
+                    No name: pick with fzf. A name switches to it (created if new) and resumes its last image; default is the original library
+                    list shows each profile and its size; rm <name> moves a whole profile to the Trash (= bgl)
   bgs opacity       show the image opacity; bgs opacity 0.3 sets it; + / - step by 0.05
   bgs where         show which files ghostty-bg uses (= bgw)
 
-Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgh = hide/show, bgw = where, bgd = delete the current image, bgm = command menu, bga = auto slideshow, bgf = effects, bgv = viewing mode, bgt = theme
+Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgh = hide/show, bgw = where, bgd = delete the current image, bgm = command menu, bga = auto slideshow, bgf = effects, bgv = viewing mode, bgt = theme, bgl = profiles
 
 Where the names come from: bg = background, plus one letter for the action
   bgs  s = select    pick one      bgn  n = next      next image
@@ -1776,6 +1939,7 @@ Where the names come from: bg = background, plus one letter for the action
   bgw  w = where     file places   bgm  m = menu      command menu
   bga  a = auto      auto slideshow bgf  f = effects   animated effect
   bgv  v = view      viewing mode   bgt  t = theme     colour theme
+  bgl  l = library   profiles
   bg+  + = more      stronger      bg-  - = less      fainter
 
 Language: GHOSTTY_BG_LANG=zh or en (default: follows LANG)
@@ -1810,6 +1974,7 @@ main() {
     menu)              cmd_menu ;;
     fx|effect)         shift; cmd_fx "${1:-}" ;;
     theme)             shift; cmd_theme "$@" ;;
+    profile|profiles)  shift; cmd_profile "$@" ;;
     _theme-apply)      shift; theme_apply "$1" ;;      # used by the fzf browser (THEME_HERE passes through)
     _theme-sample)     theme_sample ;;
     rm|remove|delete)  shift; cmd_rm "$@" ;;

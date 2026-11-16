@@ -18,6 +18,7 @@ bgv                 # 欣赏模式：清屏只看图，画面慢慢动 / viewing
 bgf                 # 用方向键挑特效，72 种（8 类 × 9）/ browse 72 animated effects with the arrow keys
 bgf snow            # 直接开某个特效，bgf off 关掉 / switch one on by name (bgf off to stop)
 bgt                 # 挑配色主题：打字搜索，终端跟着变色 / pick a colour theme, the terminal recolours as you go
+bgl work            # 切到 work 这套图库（分组：工作、生活……）/ switch to the "work" image profile
 bgm                 # 列出所有命令 / menu of all commands
 ```
 
@@ -35,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 
 安装脚本会做三件事：
 
-1. 把 `ghostty-bg`（简写 `bgs`）和快捷命令 `bgn`、`bgp`、`bgr`、`bg+`、`bg-`、`bgw`、`bgd`、`bgh`、`bgm`、`bga`、`bgf`、`bgv`、`bgt` 放到 `~/.local/bin`；72 个特效文件放到 `~/.local/share/ghostty-bg/fx/`。
+1. 把 `ghostty-bg`（简写 `bgs`）和快捷命令 `bgn`、`bgp`、`bgr`、`bg+`、`bg-`、`bgw`、`bgd`、`bgh`、`bgm`、`bga`、`bgf`、`bgv`、`bgt`、`bgl` 放到 `~/.local/bin`；72 个特效文件放到 `~/.local/share/ghostty-bg/fx/`。
 2. 运行 `ghostty-bg init`：先**备份**你的 Ghostty 配置，再在末尾加上一行 `config-file = ?background.ghostty`（外加默认透明度 0.2、铺满窗口；你已经设过的不会重复添加）。
 3. 建好图库目录 `backgrounds/`，就在你的 Ghostty 配置文件旁边。
 4. 如果图库是空的，自动放进 3 张样图（AI 生成的风景，见 [`samples/`](samples/)），装完马上就能 `bgn` 体验。已经有图的话不会动。
@@ -76,6 +77,7 @@ cd ghostty-bg && ./install.sh
 | `bgf` | 用键盘挑特效：每按一下马上换上，终端本身就是预览。`←` `→` 换一个，`↑` `↓` 换一类，回车保留，`Esc` 恢复原来的（见下面「动态特效」） |
 | `bgf <名字>` | 直接开某个特效，8 类共 72 种。`bgf list` 列出全部，`bgf 动物` 只看一类，`bgf next` / `bgf random` 换，`bgf off` 关掉 |
 | `bgt` | 配色主题：只改当前外观（浅色 / 深色）用的那个。直接敲 `bgt` 进入浏览，光标移到哪个主题，终端马上变成哪个；回车保留，`Esc` 恢复（见下面「配色主题」） |
+| `bgl` | 分组图库（profile）：直接敲 `bgl` 用 fzf 挑，`bgl work` 切到 work（没有就新建），`bgl list` 列出，`bgl rm work` 删掉（见下面「分组图库」） |
 | `bgm` | 命令菜单：一张卡片列出所有快捷命令，顶部是当前状态（哪张图、浓度、图库张数、特效），底部是缩写速记。窗口太窄或输出接了管道时改成纯文字 |
 | `bgs rm <名字>` | 把图库里的图移到废纸篓，名字见 `bgs list`；不写名字就用 fzf 多选（Tab）。只删图库里的副本，你的原图不受影响 |
 | `bgd` | 删掉当前这张，自动换到下一张 |
@@ -103,6 +105,7 @@ cd ghostty-bg && ./install.sh
 | `bgf` | e**f**fects | 动态特效 |
 | `bgv` | **v**iew | 欣赏模式 |
 | `bgt` | **t**heme | 配色主题 |
+| `bgl` | **l**ibrary | 分组图库 |
 | `bg+` / `bg-` | 多一点 / 少一点 | 背景图浓一点 / 淡一点 |
 
 忘了也没关系：敲 `bgm`，菜单最下面就有这张速记。
@@ -170,6 +173,32 @@ Ghostty 自带四百多个配色主题。以前要先用 `ghostty +list-themes` 
 
 主题写在 ghostty-bg 管理的那个小配置文件里，它在你的主配置之后加载，所以会覆盖主配置里的 `theme`，但不会改动你的主配置。
 
+### 分组图库（profile）
+
+图片多了，可以按用途分成几套，比如工作用一套、生活用一套。每套叫一个 profile，就是图库里的一个子文件夹：
+
+```
+backgrounds/            ← default：原来的图库，老图原地不动
+backgrounds/work/       ← profile work
+backgrounds/life/       ← profile life
+```
+
+```bash
+bgl work                          # 切到 work（第一次会新建）
+bgs add ~/Pictures/工作壁纸/       # 加进当前 profile，也就是 work
+bgl life                          # 换到 life
+bgl default                       # 回到原来的图库
+```
+
+| 命令 | 作用 |
+|---|---|
+| `bgl` | 用 fzf 挑一个 profile（没装 fzf 就列出全部） |
+| `bgl <名字>` | 切过去，接着显示上次在这个 profile 里看的那张；名字不存在就新建一个空的 |
+| `bgl list` | 列出所有 profile 和各自的张数，`*` 是当前这个 |
+| `bgl rm <名字>` | 把整个 profile（连同里面的图）移到废纸篓；删的是当前这个就先回到 default |
+
+切过去之后，`bgn` / `bgp` / `bgr` / `bga` / `bgv` / `bgs add` / `bgs rm` / `bgd` / `bgs list` 都只管当前 profile 里的图。特效、浓度、配色主题是全局的，换 profile 不变。同一张图可以分别加进不同的 profile。背景隐藏着（`bgh`）时换 profile，仍然保持隐藏。`bgm` 和 `bgw` 会显示当前是哪个 profile。
+
 ### 竖图怎么显示
 
 终端窗口是横的，竖图（宽高比小于 1.2，方图也算）如果铺满窗口，会被上下裁掉一大半。所以：
@@ -204,7 +233,7 @@ export GHOSTTY_BG_LANG=zh   # 或 en
 ## 卸载
 
 ```bash
-rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-,bgw,bgd,bgh,bgm,bga,bgf,bgv,bgt}
+rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-,bgw,bgd,bgh,bgm,bga,bgf,bgv,bgt,bgl}
 rm -r ~/.local/share/ghostty-bg
 ```
 
@@ -221,7 +250,7 @@ curl -fsSL https://raw.githubusercontent.com/aicoder2048/ghostty-bg/main/install
 bgs add ~/Pictures/some-photo.jpg
 ```
 
-The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` / `bgw` / `bgd` / `bgh` / `bgm` / `bga` / `bgf` / `bgv` / `bgt` in `~/.local/bin` (and 72 effect shaders in `~/.local/share/ghostty-bg/fx`), then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; remove them any time with `bgs rm`.
+The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bgp` / `bgr` / `bg+` / `bg-` / `bgw` / `bgd` / `bgh` / `bgm` / `bga` / `bgf` / `bgv` / `bgt` / `bgl` in `~/.local/bin` (and 72 effect shaders in `~/.local/share/ghostty-bg/fx`), then runs `ghostty-bg init`, which backs up your Ghostty config and appends `config-file = ?background.ghostty` (plus a default opacity of 0.2 and `cover` fit, unless you already set them). If your image library is empty, it also adds three AI-generated sample images (see [`samples/`](samples/)) so `bgn` works right away; remove them any time with `bgs rm`.
 
 **Commands** (`bgs` = `ghostty-bg`): `bgs add <image|folder> [...]` (a folder adds every PNG/JPG in it; images already in the library are skipped), `bgs list`, `bgs off` / `bgs on`, `bgs rm <name>...` (moves library images to the Trash; no name = pick with fzf), `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random, `bg+` / `bg-` image opacity ±0.05 (or `bgs opacity 0.3`), `bgw` where the files are, `bgd` delete the current image, `bgh` hide / show the background, `bgm` menu of all commands (a card with the current image, opacity, library size and effect on top; plain text in a pipe or a narrow window), `bga` auto slideshow in the foreground (a random image every 5s, or `bga 30s` / `bga 5m`; any key stops, no background process).
 
@@ -229,17 +258,19 @@ The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bg
 
 **Themes:** `bgt` picks a colour theme for the current appearance only (light or dark; the other half of a `light:A,dark:B` pair is kept). Plain `bgt` browses them: with fzf you type to search and the whole terminal recolours as the cursor moves (with a colour sample on the right); without fzf, ↑ ↓ move, ← → jump 10, r random. Enter keeps, Esc puts back what was on. `bgt all` browses light and dark themes, `bgt <name>` (case-insensitive), `bgt random`, `bgt list`, and `bgt reset` goes back to the theme in your own config. `bgt here` does the same for the current tab only: it sends the theme's colours to the tab as escape sequences (no config change, no reload, other tabs untouched; the colours survive image and effect changes and last until the tab closes); `bgt here reset` returns the tab to the global theme. Background images, opacity and effects can only be global in Ghostty. The theme is written to the managed include file, so your main config is never edited.
 
+**Profiles:** keep separate image libraries, e.g. one for work and one for home. A profile is a folder inside `backgrounds/`; `default` is `backgrounds/` itself, so an existing library stays where it is. `bgl work` switches to `work` (created if new) and resumes the image you last saw there; `bgl` alone picks one with fzf; `bgl list` shows each profile and its size; `bgl rm work` moves a whole profile to the Trash (back to `default` if it was active). Once switched, `bgn` / `bgp` / `bgr` / `bga` / `bgv` / `bgs add` / `bgs rm` / `bgd` / `bgs list` only see that profile. Effects, opacity and theme are global.
+
 **Viewing mode:** `bgv` switches to a blank screen showing only the picture at full opacity, with a slow camera-like push and drift (a motion shader that is safe only because no text is on screen). `n` / `p` / `r` or the arrow keys change the image; any other key leaves and restores opacity, effect and screen.
 
 **Portrait images:** anything narrower than 1.2:1 would be cropped heavily in a wide terminal. With ImageMagick installed, `bgs add` stores a 16:10 version with the photo centered and blurred sides (your original is untouched); without it, or with `GHOSTTY_BG_BLUR=0`, the image is added as is and shown whole (`background-image-fit = contain`).
 
-**Glossary** — every name is `bg` (background) plus one letter for the action: `bgs` **s**elect, `bgn` **n**ext, `bgp` **p**revious, `bgr` **r**andom, `bgh` **h**ide, `bgd` **d**elete, `bgw` **w**here, `bgm` **m**enu, `bga` **a**uto (slideshow), `bgf` e**f**fects, `bgv` **v**iew, `bgt` **t**heme, `bg+` / `bg-` more / less opacity. Forgot one? `bgm` shows them all.
+**Glossary** — every name is `bg` (background) plus one letter for the action: `bgs` **s**elect, `bgn` **n**ext, `bgp` **p**revious, `bgr` **r**andom, `bgh` **h**ide, `bgd` **d**elete, `bgw` **w**here, `bgm` **m**enu, `bga` **a**uto (slideshow), `bgf` e**f**fects, `bgv` **v**iew, `bgt` **t**heme, `bgl` **l**ibrary (profiles), `bg+` / `bg-` more / less opacity. Forgot one? `bgm` shows them all.
 
 **Language:** messages are in Chinese when `LANG` starts with `zh`, English otherwise. Override with `export GHOSTTY_BG_LANG=en` (or `zh`).
 
 **How it works:** `ghostty-bg` rewrites only the one-line `background.ghostty` file, then sends `SIGUSR2` to Ghostty, which reloads its config.
 
-**Uninstall:** `rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-,bgw,bgd,bgh,bgm,bga,bgf,bgv,bgt}` and `rm -r ~/.local/share/ghostty-bg`, then remove the `# --- ghostty-bg ---` block from your Ghostty config.
+**Uninstall:** `rm ~/.local/bin/{ghostty-bg,bgs,bgn,bgp,bgr,bg+,bg-,bgw,bgd,bgh,bgm,bga,bgf,bgv,bgt,bgl}` and `rm -r ~/.local/share/ghostty-bg`, then remove the `# --- ghostty-bg ---` block from your Ghostty config.
 
 ## License
 
