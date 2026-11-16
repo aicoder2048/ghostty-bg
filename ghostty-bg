@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="1.16.0"
+VERSION="1.17.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -282,7 +282,133 @@ fx_index() {
   ' | sort -t "$(printf '\t')" -k1,1n -k3,3 | cut -f2-
 }
 
-# bgf / bgs fx            the effects, one line per category
+# bgf (in a terminal): browse the effects with the keyboard. The terminal itself
+# is the preview — every key press switches the effect at once. ← → move within a
+# category, ↑ ↓ jump between categories, 1-9 pick one, r random, 0 none.
+# Enter keeps what is on screen; Esc / q puts back what was on before.
+fx_browse() {
+  local index="$1" cur="$2" g name label path i n key rest
+  # Globals, not locals: the exit trap may run after this function has returned.
+  FXB_N=(); FXB_L=(); FXB_P=(); FXB_GI=(); FXB_FIRST=(); FXB_COUNT=(); FXB_TITLE=()
+  local last_g=""
+  n=0
+  while IFS=$'\t' read -r g name label path; do
+    if [[ "$g" != "$last_g" ]]; then
+      FXB_FIRST+=("$n"); FXB_COUNT+=(0); FXB_TITLE+=("$(group_title "$g")"); last_g="$g"
+    fi
+    i=$(( ${#FXB_FIRST[@]} - 1 ))
+    FXB_COUNT[i]=$(( FXB_COUNT[i] + 1 ))
+    FXB_N+=("$name"); FXB_L+=("$label"); FXB_P+=("$path"); FXB_GI+=("$i")
+    n=$(( n + 1 ))
+  done <<< "$index"
+
+  # Start on the effect that is on now, else on the first one.
+  FXB_G=0; FXB_POS=0; FXB_OFF=0; FXB_PANEL=1
+  for (( i = 0; i < n; i++ )); do
+    if [[ "${FXB_P[i]}" == "$cur" ]]; then
+      FXB_G="${FXB_GI[i]}"; FXB_POS=$(( i - FXB_FIRST[FXB_GI[i]] ))
+    fi
+  done
+
+  # Keep an exact copy of the managed file: Esc, Ctrl+C or a closed tab put it back.
+  FXB_SAVED="$(mktemp)"
+  FXB_KEEP=0
+  cp "$BG_CONF" "$FXB_SAVED"
+  leave_browse() {
+    trap - INT TERM HUP EXIT
+    (( FXB_KEEP )) || cp "$FXB_SAVED" "$BG_CONF"
+    rm -f "$FXB_SAVED"
+    reload_ghostty
+    printf '\033[?25h\033[?1049l'        # show the cursor, leave the alternate screen
+  }
+  trap 'leave_browse; exit 0' INT TERM HUP
+  trap 'leave_browse' EXIT
+
+  fxb_index() { echo $(( FXB_FIRST[FXB_G] + FXB_POS )); }
+  fxb_apply() {
+    if (( FXB_OFF )); then FX_NEXT=""; else FX_NEXT="${FXB_P[$(fxb_index)]}"; fi
+    write_include "$(current_image)" "$(managed_opacity)" "$(hidden_image)"
+    reload_ghostty
+  }
+  fxb_draw() {
+    local k j sel line
+    printf '\033[H\033[J'
+    (( FXB_PANEL )) || return 0
+    # Line 1: the categories. Line 2: the effects in this one. Line 3: what is on.
+    line="  "
+    for (( k = 0; k < ${#FXB_TITLE[@]}; k++ )); do
+      if (( k == FXB_G )); then line+=$'\033[7m '"${FXB_TITLE[k]}"$' \033[0m '
+      else line+=" ${FXB_TITLE[k]}  "; fi
+    done
+    printf '%s\n' "$line"
+    line="  "
+    sel="$(fxb_index)"
+    for (( k = 0; k < FXB_COUNT[FXB_G]; k++ )); do
+      j=$(( FXB_FIRST[FXB_G] + k ))
+      if (( j == sel && ! FXB_OFF )); then line+=$'\033[7m'" $(( k + 1 )) ${FXB_N[j]} "$'\033[0m '
+      else line+=" $(( k + 1 )) ${FXB_N[j]}  "; fi
+    done
+    printf '%s\n' "$line"
+    if (( FXB_OFF )); then
+      printf '  \033[1m%s\033[0m\n' "$(msg '(no effect)' '（无特效）')"
+    else
+      printf '  \033[1m%s\033[0m  %s   \033[2m%s %d/%d\033[0m\n' "${FXB_N[sel]}" "${FXB_L[sel]}" \
+             "${FXB_TITLE[FXB_G]}" $(( FXB_POS + 1 )) "${FXB_COUNT[FXB_G]}"
+    fi
+    printf '  \033[2m%s\033[0m\n' "$(msg '← → next/previous · ↑ ↓ category · 1-9 pick · r random · 0 none · space hide this · Enter keep · Esc undo' \
+                                          '← → 换一个 · ↑ ↓ 换一类 · 1-9 直接选 · r 随机 · 0 关掉 · 空格 隐藏这几行 · 回车 保留 · Esc 恢复原来的')"
+  }
+
+  printf '\033[?1049h\033[?25l'   # alternate screen, hide the cursor
+  fxb_apply
+  fxb_draw
+
+  while IFS= read -r -s -n 1 key </dev/tty; do
+    if [[ "$key" == $'\033' ]]; then
+      # Arrow keys arrive as ESC [ A..D; a lone Esc has nothing after it.
+      rest=""
+      IFS= read -r -s -n 2 -t 1 rest </dev/tty || true
+      case "$rest" in
+        '[C') key=l ;; '[D') key=h ;; '[A') key=k ;; '[B') key=j ;;
+        *)    break ;;
+      esac
+    fi
+    case "$key" in
+      '')    FXB_KEEP=1; break ;;                       # Enter
+      q|Q)   break ;;
+      ' ')   FXB_PANEL=$(( 1 - FXB_PANEL )); fxb_draw; continue ;;
+      l|L)   FXB_POS=$(( (FXB_POS + 1) % FXB_COUNT[FXB_G] )) ;;
+      h|H)   FXB_POS=$(( (FXB_POS - 1 + FXB_COUNT[FXB_G]) % FXB_COUNT[FXB_G] )) ;;
+      j|J|k|K)
+             if [[ "$key" == [jJ] ]]; then FXB_G=$(( (FXB_G + 1) % ${#FXB_FIRST[@]} ))
+             else FXB_G=$(( (FXB_G - 1 + ${#FXB_FIRST[@]}) % ${#FXB_FIRST[@]} )); fi
+             (( FXB_POS < FXB_COUNT[FXB_G] )) || FXB_POS=$(( FXB_COUNT[FXB_G] - 1 )) ;;
+      [1-9]) (( key <= FXB_COUNT[FXB_G] )) || continue
+             FXB_POS=$(( key - 1 )) ;;
+      r|R)   i=$(( RANDOM % n ))
+             if (( n > 1 && i == $(fxb_index) )); then i=$(( (i + 1) % n )); fi
+             FXB_G="${FXB_GI[i]}"; FXB_POS=$(( i - FXB_FIRST[FXB_GI[i]] )) ;;
+      0)     FXB_OFF=1; fxb_apply; fxb_draw; continue ;;
+      *)     continue ;;
+    esac
+    FXB_OFF=0
+    fxb_apply
+    fxb_draw
+  done
+  leave_browse
+
+  if (( ! FXB_KEEP )); then
+    msg "Effect unchanged." "特效没有改动。"
+  elif (( FXB_OFF )); then
+    msg "Effect is off." "特效已关闭。"
+  else
+    i="$(fxb_index)"
+    msg "Effect: ${FXB_N[i]} — ${FXB_L[i]}  (bgf off stops it)" "特效：${FXB_N[i]} ${FXB_L[i]}（bgf off 关掉）"
+  fi
+}
+
+# bgf / bgs fx            in a terminal: browse with the keyboard (fx_browse)
+# bgf list                the effects, one line per category
 # bgf <category>          one category in detail (English or Chinese name)
 # bgf <name>              switch an effect on (replaces the previous one)
 # bgf next | prev         step through all effects, category by category
@@ -296,6 +422,11 @@ cmd_fx() {
   [[ -n "$index" || "$want" == off || "$want" == none ]] ||
     die "no effects are installed in $FX_DIR — run the installer again." \
         "$FX_DIR 里没有特效——请重新运行一次安装命令。"
+
+  if [[ -z "$want" && -t 0 && -t 1 ]]; then
+    fx_browse "$index" "$cur"
+    return
+  fi
 
   if [[ -z "$want" || "$want" == list ]]; then
     # Compact: a title per category, then its effects wrapped to the window.
@@ -320,11 +451,11 @@ cmd_fx() {
       END { if (group != "") printf "\n" }'
     echo
     if [[ -n "$cur" ]]; then
-      msg "On: $(fx_name "$cur").  bgf <name> · bgf next · bgf random · bgf <category> for details · bgf off" \
-          "当前特效：$(fx_name "$cur")。换：bgf <名字> / bgf next / bgf random；看一类：bgf 动物；关掉：bgf off"
+      msg "On: $(fx_name "$cur").  bgf alone to browse with the arrow keys · bgf <name> · bgf random · bgf off" \
+          "当前特效：$(fx_name "$cur")。用方向键挑：直接敲 bgf；换：bgf <名字> / bgf random；关掉：bgf off"
     else
-      msg "No effect is on.  bgf <name> · bgf next · bgf random · bgf <category> for details" \
-          "现在没有开特效。开启：bgf <名字>；逐个看：bgf next；随机：bgf random；看一类：bgf 动物"
+      msg "No effect is on.  bgf alone to browse with the arrow keys · bgf <name> · bgf random" \
+          "现在没有开特效。用方向键挑：直接敲 bgf；开启：bgf <名字>；随机：bgf random"
     fi
     return
   fi
@@ -381,7 +512,7 @@ cmd_fx() {
 
   found="$(printf '%s\n' "$index" | awk -F '\t' -v n="$want" '$2 == n { print $4; exit }')"
   [[ -n "$found" ]] ||
-    die "no effect named \"$want\" — see: bgf" "没有叫 \"$want\" 的特效——用 bgf 看有哪些"
+    die "no effect named \"$want\" — see: bgf list" "没有叫 \"$want\" 的特效——用 bgf list 看有哪些"
 
   FX_NEXT="$found"
   write_include "$(current_image)" "$(managed_opacity)" "$(hidden_image)"
@@ -1042,7 +1173,7 @@ cmd_menu() {
          bgs  挑一张（fzf 预览）       bga  自动轮播，按任意键停
          bgv  欣赏模式：清屏只看图，画面慢慢动
   外观   bg+  浓一点      bg-  淡一点      bgh  隐藏 / 显示
-         bgf  特效 8 类 × 9 种（bgf 列出，bgf next / random 换，bgf off 关）
+         bgf  特效 8 类 × 9 种（bgf 用方向键挑，bgf list 列出，bgf off 关）
   图库   bgs add <图或文件夹>   加图        bgd  删掉当前这张
          bgs rm <名字>          删图        bgs list  列出
   其他   bgw  文件在哪    bgm  这个菜单    bgs help  完整帮助
@@ -1058,7 +1189,7 @@ EOF
            bgs  pick one (fzf preview)   bga  auto slideshow, any key stops
            bgv  viewing mode: just the picture, slowly moving
   look     bg+  stronger    bg-  fainter     bgh  hide / show
-           bgf  effects, 8 sets of 9 (bgf lists, bgf next / random, bgf off)
+           bgf  effects, 8 sets of 9 (bgf to browse, bgf list, bgf off)
   library  bgs add <image or folder>  add   bgd  delete current
            bgs rm <name>              remove      bgs list  list
   more     bgw  where       bgm  this menu   bgs help  full help
@@ -1099,7 +1230,8 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgs play [间隔]   轮播：在前台每隔几秒随机换一张，按任意键停（默认 5 秒；可写 30s、5m）
   bgs list          列出图库，* 是当前这张
   bgs off | on      隐藏 / 恢复背景图（bgh 在两者之间切换）
-  bgs fx [名字]     动态特效 8 类：天气 自然 动物 海洋 节日 太空 极客 奇幻。不写名字就列出；写类别名只看那一类；next / prev / random 换；off 关掉
+  bgs fx [名字]     动态特效 8 类：天气 自然 动物 海洋 节日 太空 极客 奇幻。不写名字就进入浏览：← → 换一个，↑ ↓ 换一类，回车保留，Esc 恢复
+                    list 列出全部；写类别名只看那一类；next / prev / random 换；off 关掉
   bgs rm <名字>     把图库里的图移到废纸篓（不写名字就用 fzf 多选；原图不受影响）
   bgs opacity       查看背景图浓度；bgs opacity 0.3 设成 0.3；+ / - 每次加减 0.05
   bgs where         显示用到的配置文件和图库位置（= bgw）
@@ -1133,7 +1265,8 @@ Usage (bgs and ghostty-bg are the same command):
   bgs play [time]   slideshow in the foreground: a random image every few seconds, any key stops (default 5s; 30s, 5m)
   bgs list          list the library, * marks the current image
   bgs off | on      hide / bring back the background image (bgh toggles)
-  bgs fx [name]     animated effects in 8 categories: weather nature animals ocean festival space geek fantasy. No name lists them; a category shows just that one; next / prev / random switch; off stops
+  bgs fx [name]     animated effects in 8 categories: weather nature animals ocean festival space geek fantasy. No name: browse them (← → effect, ↑ ↓ category, Enter keeps, Esc undoes)
+                    list shows them all; a category shows just that one; next / prev / random switch; off stops
   bgs rm <name>     move library images to the Trash (no name: pick with fzf; originals untouched)
   bgs opacity       show the image opacity; bgs opacity 0.3 sets it; + / - step by 0.05
   bgs where         show which files ghostty-bg uses (= bgw)

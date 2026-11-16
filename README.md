@@ -15,7 +15,8 @@ bgd                 # 删掉当前这张（移到废纸篓）/ delete the curren
 bgh                 # 隐藏 / 显示背景图 / hide or show the background
 bga                 # 自动轮播：每 5 秒随机换一张，按任意键停 / auto slideshow, any key stops
 bgv                 # 欣赏模式：清屏只看图，画面慢慢动 / viewing mode: just the picture, slowly moving
-bgf snow            # 动态特效 72 种（8 类 × 9）/ 72 animated effects in 8 sets of 9 (bgf off to stop)
+bgf                 # 用方向键挑特效，72 种（8 类 × 9）/ browse 72 animated effects with the arrow keys
+bgf snow            # 直接开某个特效，bgf off 关掉 / switch one on by name (bgf off to stop)
 bgm                 # 列出所有命令 / menu of all commands
 ```
 
@@ -71,7 +72,8 @@ cd ghostty-bg && ./install.sh
 | `bgh` | 隐藏背景图；再按一次恢复成刚才那张（= `bgs off` / `bgs on`） |
 | `bga` | 自动轮播：在当前终端里每隔几秒随机换一张，按任意键停。默认 5 秒，也可以 `bga 30s`、`bga 5m`。它在前台运行，不留后台进程，关掉标签页也就结束了 |
 | `bgv` | 欣赏模式：切到一个空白屏幕，只剩背景图（完全不透明），画面像纪录片镜头一样慢慢推近、平移；开着的特效照常。`n` / `p` / `r` 或方向键换图，其他任意键退出，浓度、特效、屏幕内容全部恢复原样 |
-| `bgf <名字>` | 动态特效，叠在背景上，8 类共 72 种（见下面「动态特效」）。`bgf` 列出全部，`bgf 动物` 只看一类，`bgf next` / `bgf random` 换，`bgf off` 关掉 |
+| `bgf` | 用键盘挑特效：每按一下马上换上，终端本身就是预览。`←` `→` 换一个，`↑` `↓` 换一类，回车保留，`Esc` 恢复原来的（见下面「动态特效」） |
+| `bgf <名字>` | 直接开某个特效，8 类共 72 种。`bgf list` 列出全部，`bgf 动物` 只看一类，`bgf next` / `bgf random` 换，`bgf off` 关掉 |
 | `bgm` | 命令菜单：一屏列出所有快捷命令和当前状态 |
 | `bgs rm <名字>` | 把图库里的图移到废纸篓，名字见 `bgs list`；不写名字就用 fzf 多选（Tab）。只删图库里的副本，你的原图不受影响 |
 | `bgd` | 删掉当前这张，自动换到下一张 |
@@ -117,7 +119,22 @@ cd ghostty-bg && ./install.sh
 | 极客 | `binary` 二进制 · `blocks` 方块 · `circuit` 电路 · `coderain` 代码雨 · `neongrid` 霓虹网格 · `pixels` 像素 · `radar` 雷达 · `snake` 贪吃蛇 · `waveform` 示波器 |
 | 奇幻 | `crystals` 水晶 · `dragon` 龙 · `fairies` 小精灵 · `magiccircle` 魔法阵 · `phoenix` 凤凰 · `portal` 传送门 · `runes` 符文 · `sparkles` 魔法火花 · `wisps` 鬼火 |
 
-- `bgf`：按类列出全部；`bgf 动物`（或 `bgf animals`）：只看一类，带说明
+**挑特效最快的办法：直接敲 `bgf`。** 屏幕上方出现一个小面板，每按一下键，特效马上换上：
+
+| 按键 | 作用 |
+|---|---|
+| `←` `→` | 这一类里换上一个 / 下一个 |
+| `↑` `↓` | 换到上一类 / 下一类 |
+| `1`–`9` | 直接选这一类的第几个 |
+| `r` | 随机来一个 |
+| `0` | 先关掉看看 |
+| 空格 | 隐藏 / 显示面板，看清整个画面 |
+| 回车 | 保留现在这个，退出 |
+| `Esc` / `q` | 恢复进来之前的特效，退出（`Ctrl+C`、关掉标签页也一样） |
+
+其他用法：
+
+- `bgf list`：按类列出全部；`bgf 动物`（或 `bgf animals`）：只看一类，带说明
 - `bgf next` / `bgf prev`：一个个换着看；`bgf random`：随机来一个
 
 - 特效是 Ghostty 用显卡跑的 shader，只往画面上叠加图案，不会扭曲文字。
@@ -180,7 +197,7 @@ The installer puts `ghostty-bg` (short name `bgs`) and the shortcuts `bgn` / `bg
 
 **Commands** (`bgs` = `ghostty-bg`): `bgs add <image|folder> [...]` (a folder adds every PNG/JPG in it; images already in the library are skipped), `bgs list`, `bgs off` / `bgs on`, `bgs rm <name>...` (moves library images to the Trash; no name = pick with fzf), `bgs init`, and plain `bgs` to pick with fzf (preview via chafa if installed). Shortcuts: `bgn` next, `bgp` previous, `bgr` random, `bg+` / `bg-` image opacity ±0.05 (or `bgs opacity 0.3`), `bgw` where the files are, `bgd` delete the current image, `bgh` hide / show the background, `bgm` menu of all commands, `bga` auto slideshow in the foreground (a random image every 5s, or `bga 30s` / `bga 5m`; any key stops, no background process).
 
-**Effects:** `bgf <name>` layers an animated shader over the background; `bgf off` stops it. `bgf` lists them by category, `bgf <category>` shows one category with descriptions, `bgf next` / `bgf prev` / `bgf random` switch. 72 effects in 8 sets of 9 — weather: `drizzle`, `hail`, `leaves`, `lightning`, `rainbow`, `snow`, `sunbeams`, `tornado`, `wind`; nature: `aurora`, `dandelion`, `dew`, `embers`, `grass`, `lotus`, `petals`, `ripples`, `sunflowers`; animals: `ants`, `bats`, `bees`, `birds`, `butterflies`, `cat`, `dragonflies`, `fireflies`, `rabbit`; ocean: `bubbles`, `dolphins`, `fish`, `jellyfish`, `seahorse`, `seaweed`, `shark`, `turtle`, `whale`; festival: `balloons`, `confetti`, `fireworks`, `gifts`, `hearts`, `lanterns`, `lights`, `pumpkins`, `sparklers`; space: `blackhole`, `comet`, `meteors`, `nebula`, `planet`, `rocket`, `satellite`, `ufo`, `warp`; geek: `binary`, `blocks`, `circuit`, `coderain`, `neongrid`, `pixels`, `radar`, `snake`, `waveform`; fantasy: `crystals`, `dragon`, `fairies`, `magiccircle`, `phoenix`, `portal`, `runes`, `sparkles`, `wisps`. The shaders only draw on top, so text stays sharp; they animate in the focused window and work alongside your own `custom-shader` lines. Add your own `.glsl` files to `~/.local/share/ghostty-bg/fx/`.
+**Effects:** `bgf <name>` layers an animated shader over the background; `bgf off` stops it. Plain `bgf` in a terminal opens a browser: every key switches the effect at once (← → within a category, ↑ ↓ between categories, 1-9 pick, r random, 0 none, space hides the panel, Enter keeps, Esc puts back what was on). `bgf list` lists them by category, `bgf <category>` shows one category with descriptions, `bgf next` / `bgf prev` / `bgf random` switch. 72 effects in 8 sets of 9 — weather: `drizzle`, `hail`, `leaves`, `lightning`, `rainbow`, `snow`, `sunbeams`, `tornado`, `wind`; nature: `aurora`, `dandelion`, `dew`, `embers`, `grass`, `lotus`, `petals`, `ripples`, `sunflowers`; animals: `ants`, `bats`, `bees`, `birds`, `butterflies`, `cat`, `dragonflies`, `fireflies`, `rabbit`; ocean: `bubbles`, `dolphins`, `fish`, `jellyfish`, `seahorse`, `seaweed`, `shark`, `turtle`, `whale`; festival: `balloons`, `confetti`, `fireworks`, `gifts`, `hearts`, `lanterns`, `lights`, `pumpkins`, `sparklers`; space: `blackhole`, `comet`, `meteors`, `nebula`, `planet`, `rocket`, `satellite`, `ufo`, `warp`; geek: `binary`, `blocks`, `circuit`, `coderain`, `neongrid`, `pixels`, `radar`, `snake`, `waveform`; fantasy: `crystals`, `dragon`, `fairies`, `magiccircle`, `phoenix`, `portal`, `runes`, `sparkles`, `wisps`. The shaders only draw on top, so text stays sharp; they animate in the focused window and work alongside your own `custom-shader` lines. Add your own `.glsl` files to `~/.local/share/ghostty-bg/fx/`.
 
 **Viewing mode:** `bgv` switches to a blank screen showing only the picture at full opacity, with a slow camera-like push and drift (a motion shader that is safe only because no text is on screen). `n` / `p` / `r` or the arrow keys change the image; any other key leaves and restores opacity, effect and screen.
 
