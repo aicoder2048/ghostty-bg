@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="1.18.0"
+VERSION="1.19.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -637,10 +637,48 @@ list_themes() {
   "$bin" +list-themes --plain --color="$1" 2>/dev/null | sed 's/ ([a-z]*)$//'
 }
 
+# ---------- per-tab colours (bgt here) ----------
+
+# `bgt here` recolours only the current tab: the theme's colours are sent to
+# the terminal as escape sequences (OSC 4 palette, OSC 10/11/12 foreground,
+# background, cursor). Nothing is written to the config and Ghostty is not
+# reloaded, so other tabs keep the global theme. The colours last until the
+# tab closes or `bgt here reset`.
+
+# The file of a theme, by name.
+theme_file() {
+  local bin
+  bin="$(ghostty_bin)"
+  [[ -n "$bin" ]] || return 0
+  "$bin" +list-themes --plain --path 2>/dev/null |
+    awk -v n="$1" '!done && index($0, n " (") == 1 { sub(/^.* \([a-z]+\) /, ""); print; done = 1 }'   # no early exit: SIGPIPE + pipefail
+}
+
+# Send a theme's colours to this tab.
+theme_here_apply() {
+  local f
+  f="$(theme_file "$1")"
+  [[ -n "$f" && -f "$f" ]] || return 0
+  awk '
+    function osc(s) { printf "\033]%s\007", s }
+    { gsub(/[ \t]/, "") }
+    /^palette=[0-9]+=#/ { split(substr($0, 9), kv, "="); osc("4;" kv[1] ";" kv[2]) }
+    /^foreground=#/   { osc("10;" substr($0, 12)) }
+    /^background=#/   { osc("11;" substr($0, 12)) }
+    /^cursor-color=#/ { osc("12;" substr($0, 14)) }
+  ' "$f" 2>/dev/null >/dev/tty || true
+}
+
+# Back to the global theme in this tab.
+theme_here_reset() {
+  printf '\033]104\007\033]110\007\033]111\007\033]112\007' 2>/dev/null >/dev/tty || true
+}
+
 # Switch the theme for the current appearance (no checks; used while browsing).
 # The base value comes from THEME_BASE when set (the value before browsing began).
 theme_apply() {
   local base slot
+  if [[ -n "${THEME_HERE:-}" ]]; then theme_here_apply "$1"; return; fi
   base="${THEME_BASE-$(effective_theme)}"
   slot="${THEME_SLOT:-$(appearance)}"
   THEME_NEXT="$(theme_with "$base" "$slot" "$1")"
@@ -666,16 +704,23 @@ theme_sample() {
   printf '  \033[90m# comment\033[0m  \033[95mfn\033[0m \033[94mmain\033[0m() { \033[92m"hello"\033[0m }\n'
 }
 
+# What bgt is changing, for headers and messages: this tab, or the light / dark theme.
+theme_scope() {
+  if [[ -n "${THEME_HERE:-}" ]]; then msg "this tab" "这个 Tab"
+  elif [[ "$THEME_SLOT" == dark ]]; then msg "dark appearance" "深色外观"
+  else msg "light appearance" "浅色外观"; fi
+}
+
 # Browse with fzf: type to search, the terminal recolours as the cursor moves.
 theme_browse_fzf() {
   local list="$1" start="$2" self pick rc
   self="$0"; [[ "$self" == */* ]] || self="$(command -v "$self")"
-  export THEME_BASE THEME_SLOT
+  export THEME_BASE THEME_SLOT THEME_HERE
   pick="$(printf '%s\n' "$list" | fzf --height=70% --layout=reverse --border=rounded \
       --prompt="$(msg 'theme> ' '主题> ')" \
-      --header="$(msg "Changing the $THEME_SLOT theme · type to search · Enter keeps · Esc undoes" \
-                      "改的是$( [[ "$THEME_SLOT" == dark ]] && echo 深色 || echo 浅色 )外观的主题 · 打字搜索 · 回车保留 · Esc 恢复")" \
-      --bind "load:pos($start)" --bind "change:first" \
+      --header="$(msg "Changing: $(theme_scope) · type to search · Enter keeps · Esc undoes" \
+                      "改的是：$(theme_scope) · 打字搜索 · 回车保留 · Esc 恢复")" \
+      --bind "start:unbind(focus)" --bind "load:pos($start)+rebind(focus)" --bind "change:first" \
       --bind "focus:execute-silent('$self' _theme-apply {})" \
       --preview "'$self' _theme-sample" --preview-window=right,50%,border-left)" && rc=0 || rc=$?
   (( rc == 0 )) && [[ -n "$pick" ]] || return 1
@@ -694,7 +739,7 @@ theme_browse_keys() {
     local k j
     printf '\033[0m\033[H\033[J'
     printf '\n  \033[1m%s\033[0m  \033[2m%d/%d\033[0m\n\n' \
-      "$(msg "Theme ($THEME_SLOT appearance)" "主题（$( [[ "$THEME_SLOT" == dark ]] && echo 深色 || echo 浅色 )外观）")" $(( sel + 1 )) "$n"
+      "$(msg "Theme ($(theme_scope))" "主题（$(theme_scope)）")" $(( sel + 1 )) "$n"
     top=$(( sel - rows / 2 )); (( top >= 0 )) || top=0
     (( top + rows <= n )) || top=$(( n - rows )); (( top >= 0 )) || top=0
     for (( k = 0; k < rows && top + k < n; k++ )); do
@@ -746,13 +791,26 @@ theme_browse_keys() {
 # bgt random                 a random one
 # bgt list                   list them (* = in use)
 # bgt reset                  back to the theme in your own Ghostty config
+# bgt here [...]             the same, but only for this tab (no config change, no reload)
 cmd_theme() {
   require_init
+  THEME_HERE=""
+  if [[ "${1:-}" == here ]]; then
+    THEME_HERE=1; shift
+    { : >/dev/tty; } 2>/dev/null ||
+      die "bgt here changes the colours of a terminal tab — run it in one." "bgt here 改的是终端 Tab 的颜色——请在终端里运行。"
+  fi
   local want="${1:-}" slot list cur start pick rc=0
   slot="$(appearance)"
   THEME_SLOT="$slot"
   THEME_BASE="$(effective_theme)"
   cur="$(theme_part "$THEME_BASE" "$slot")"
+
+  if [[ -n "$THEME_HERE" && ( "$want" == reset || "$want" == off || "$want" == default ) ]]; then
+    theme_here_reset
+    msg "This tab: back to the global theme." "这个 Tab：恢复成全局主题。"
+    return
+  fi
 
   case "$want" in
     reset|off|default)
@@ -777,17 +835,17 @@ cmd_theme() {
 
   if [[ -n "$want" && "$want" != all ]]; then
     # A name: exact first, then ignoring case.
-    pick="$(list_themes all | awk -v w="$want" '$0 == w { print; exit }')"
-    [[ -n "$pick" ]] || pick="$(list_themes all | awk -v w="$want" 'tolower($0) == tolower(w) { print; exit }')"
+    pick="$(list_themes all | awk -v w="$want" '!f && $0 == w { print; f = 1 }')"
+    [[ -n "$pick" ]] || pick="$(list_themes all | awk -v w="$want" '!f && tolower($0) == tolower(w) { print; f = 1 }')"
     [[ -n "$pick" ]] || die "no theme named \"$want\" — see: bgt list" "没有叫 \"$want\" 的主题——用 bgt list 看有哪些"
     theme_apply "$pick"
-    msg "Theme ($slot): $pick" "主题（$( [[ "$slot" == dark ]] && echo 深色 || echo 浅色 )外观）：$pick"
+    msg "Theme ($(theme_scope)): $pick" "主题（$(theme_scope)）：$pick"
     return
   fi
 
   # Browsing needs a terminal.
-  [[ -t 0 && -t 1 ]] || { cmd_theme list; return; }
-  start="$(printf '%s\n' "$list" | awk -v c="$cur" '$0 == c { print NR; exit }')"
+  [[ -t 0 && -t 1 ]] || { THEME_HERE=""; cmd_theme list; return; }
+  start="$(printf '%s\n' "$list" | awk -v c="$cur" '!f && $0 == c { print NR; f = 1 }')"
   [[ -n "$start" ]] || start=1
 
   # Keep an exact copy of the managed file: Esc, Ctrl+C or a closed tab put it back.
@@ -795,9 +853,13 @@ cmd_theme() {
   cp "$BG_CONF" "$TB_SAVED"
   leave_theme() {
     trap - INT TERM HUP EXIT
-    (( TB_KEEP )) || cp "$TB_SAVED" "$BG_CONF"
+    if [[ -n "$THEME_HERE" ]]; then
+      (( TB_KEEP )) || theme_here_reset        # this tab only: nothing to reload
+    else
+      (( TB_KEEP )) || cp "$TB_SAVED" "$BG_CONF"
+      reload_ghostty
+    fi
     rm -f "$TB_SAVED"
-    reload_ghostty
     printf '\033[?25h'
   }
   trap 'leave_theme; exit 0' INT TERM HUP
@@ -814,7 +876,9 @@ cmd_theme() {
   fi
   leave_theme
   if (( TB_KEEP )); then
-    msg "Theme ($slot): $pick" "主题（$( [[ "$slot" == dark ]] && echo 深色 || echo 浅色 )外观）：$pick"
+    msg "Theme ($(theme_scope)): $pick" "主题（$(theme_scope)）：$pick"
+  elif [[ -n "$THEME_HERE" ]]; then
+    msg "This tab: back to the global theme." "这个 Tab：恢复成全局主题。"
   else
     msg "Theme unchanged." "主题没有改动。"
   fi
@@ -1510,7 +1574,7 @@ menu_card() {
     gap
     cells 外观 bg+ 浓一点 bg- 淡一点 bgh '隐藏 / 显示'
     cells "" +bgf '特效 72 种：直接敲 bgf 用方向键挑 · bgf list 列出 · bgf off 关'
-    cells "" +bgt '配色主题：直接敲 bgt 搜索着挑 · bgt reset 恢复'
+    cells "" +bgt '配色主题：直接敲 bgt 搜索着挑 · bgt here 只改这个 Tab'
     gap
     cells 图库 'bgs add' 加图或文件夹 bgd 删掉当前这张 'bgs rm' 按名字删
     cells "" 'bgs list' 列出全部
@@ -1526,7 +1590,7 @@ menu_card() {
     gap
     cells look bg+ stronger bg- fainter bgh 'hide / show'
     cells "" +bgf 'effects, 72 of them: plain bgf to browse · bgf list · bgf off'
-    cells "" +bgt 'colour theme: plain bgt to search and pick · bgt reset'
+    cells "" +bgt 'colour theme: plain bgt to search · bgt here for this tab only'
     gap
     cells library 'bgs add' 'add images' bgd 'delete current' 'bgs rm' 'remove by name'
     cells "" 'bgs list' 'list them all'
@@ -1597,7 +1661,7 @@ cmd_menu() {
          bgv  欣赏模式：清屏只看图，画面慢慢动
   外观   bg+  浓一点      bg-  淡一点      bgh  隐藏 / 显示
          bgf  特效 8 类 × 9 种（bgf 用方向键挑，bgf list 列出，bgf off 关）
-         bgt  配色主题（bgt 搜索着挑，bgt reset 恢复）
+         bgt  配色主题（bgt 搜索着挑，bgt here 只改这个 Tab，bgt reset 恢复）
   图库   bgs add <图或文件夹>   加图        bgd  删掉当前这张
          bgs rm <名字>          删图        bgs list  列出
   其他   bgw  文件在哪    bgm  这个菜单    bgs help  完整帮助
@@ -1614,7 +1678,7 @@ EOF
            bgv  viewing mode: just the picture, slowly moving
   look     bg+  stronger    bg-  fainter     bgh  hide / show
            bgf  effects, 8 sets of 9 (bgf to browse, bgf list, bgf off)
-           bgt  colour theme (bgt to search and pick, bgt reset)
+           bgt  colour theme (bgt to search and pick, bgt here for this tab only, bgt reset)
   library  bgs add <image or folder>  add   bgd  delete current
            bgs rm <name>              remove      bgs list  list
   more     bgw  where       bgm  this menu   bgs help  full help
@@ -1659,6 +1723,7 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
                     list 列出全部；写类别名只看那一类；next / prev / random 换；off 关掉
   bgs theme [名字]  配色主题，只改当前外观（浅色 / 深色）用的那个。不写名字就进入浏览：装了 fzf 可以打字搜索，
                     光标移到哪个终端就换成哪个，回车保留，Esc 恢复；all 浏览全部；list 列出；random 随机；reset 恢复成你自己配置里的
+                    bgs theme here [名字] 只改当前这个 Tab（不改配置、不影响别的 Tab，关掉 Tab 就没了）；here reset 恢复成全局主题
   bgs rm <名字>     把图库里的图移到废纸篓（不写名字就用 fzf 多选；原图不受影响）
   bgs opacity       查看背景图浓度；bgs opacity 0.3 设成 0.3；+ / - 每次加减 0.05
   bgs where         显示用到的配置文件和图库位置（= bgw）
@@ -1697,6 +1762,7 @@ Usage (bgs and ghostty-bg are the same command):
   bgs theme [name]  colour theme, only for the current appearance (light / dark). No name: browse them (with fzf you can
                     type to search; the terminal recolours as you move; Enter keeps, Esc undoes); all browses every theme;
                     list, random; reset goes back to the theme in your own config
+                    bgs theme here [name] only this tab (no config change, other tabs untouched, gone when the tab closes); here reset
   bgs rm <name>     move library images to the Trash (no name: pick with fzf; originals untouched)
   bgs opacity       show the image opacity; bgs opacity 0.3 sets it; + / - step by 0.05
   bgs where         show which files ghostty-bg uses (= bgw)
@@ -1743,8 +1809,8 @@ main() {
     toggle)            cmd_toggle ;;
     menu)              cmd_menu ;;
     fx|effect)         shift; cmd_fx "${1:-}" ;;
-    theme)             shift; cmd_theme "${1:-}" ;;
-    _theme-apply)      shift; theme_apply "$1" ;;      # used by the fzf browser
+    theme)             shift; cmd_theme "$@" ;;
+    _theme-apply)      shift; theme_apply "$1" ;;      # used by the fzf browser (THEME_HERE passes through)
     _theme-sample)     theme_sample ;;
     rm|remove|delete)  shift; cmd_rm "$@" ;;
     opacity)           shift; cmd_opacity "${1:-}" ;;
