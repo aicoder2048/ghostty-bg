@@ -1,114 +1,114 @@
-// whale — a big whale glides slowly across, fluke beating, now and then blowing a spout.
+// whale — a humpback whale glides slowly out of the blue depth haze, lit by god rays and caustics from above.
 // zh: 鲸鱼
 // group: ocean
 // Part of ghostty-bg. It only draws on top and never moves or distorts the
-// text underneath (light shapes on dark themes, dark shapes on light themes).
+// text underneath.
 
-const float INTENSITY = 0.40;   // overall strength (0 = off); kept moderate because the whale is huge
-const float PERIOD    = 42.0;   // seconds from the start of one crossing to the next
-const float CROSS     = 30.0;   // seconds one crossing takes (then about 12 s of open water)
-const float WIDTH     = 0.75;   // whale length as a fraction of the window width
-const float SPOUT     = 7.0;    // seconds between two spouts
-const int   DROPS     = 20;     // water drops in one spout
+const float INTENSITY = 1.0;    // overall strength (0 = off)
+const float OPACITY   = 0.62;   // how solid the whale body is at its sunlit top (it fades toward belly and tail)
+const float PERIOD    = 34.0;   // seconds from the start of one crossing to the next
+const float CROSS     = 34.0;   // seconds one crossing takes (= PERIOD: it turns round off-screen and swims back)
+const float WIDTH     = 0.53;   // whale length (snout to fluke tip) as a fraction of the window width
+const float DEPTH_Y   = 0.27;   // height of the swim line above the bottom (0..1); keeps it under the text
+const float BEAT      = 0.62;   // speed of the slow up-down tail beat (radians per second)
+const float RAYS      = 0.07;   // strength of the slanting god rays in the water
+const float GLOW      = 1.0;    // luminous edge and the soft halo of scattered light around the whale
+const int   BUBBLES   = 10;     // glinting bubbles rising from the blowhole
 
-float hash1(float n) {
-    return fract(sin(n) * 43758.5453123);
+const float PI = 3.14159265;
+
+float hash1(float n) { return fract(sin(n) * 43758.5453123); }
+float hash21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+
+float vnoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash21(i), hash21(i + vec2(1, 0)), f.x),
+               mix(hash21(i + vec2(0, 1)), hash21(i + vec2(1, 1)), f.x), f.y);
 }
 
-// Distance to the segment a-b, and how far along it (0 at a, 1 at b).
-vec2 segment(vec2 p, vec2 a, vec2 b) {
-    vec2 pa = p - a, ba = b - a;
-    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-    return vec2(length(pa - ba * h), h);
+// ---- Body profile -------------------------------------------------------
+// The whale faces +x. s runs along the body: 0 at the snout (x = 1.05) and 1 at
+// the tail root (x = -1.0). Humpback proportions: slender flat head about a third
+// of the length, deep belly behind it, a small hump and fin two thirds back, then
+// a long taper to the tail stock. Kept smooth: the light does the detail.
+float sOf(float x) { return (1.05 - x) / 2.05; }
+
+float topY(float s) {
+    float head = 0.190 * pow(clamp(s / 0.42, 0.0, 1.0), 0.62);
+    float t = head * (1.0 - 0.80 * smoothstep(0.42, 1.0, s));
+    t += 0.020 * exp(-pow((s - 0.66) / 0.07, 2.0));                     // dorsal hump
+    float fin = smoothstep(0.60, 0.665, s) * (1.0 - smoothstep(0.662, 0.69, s));
+    return t + 0.036 * fin * fin;                                        // small hooked fin
 }
 
-// How far the spine is lifted at x: only the back half bends, more toward the tail.
-float bendAt(float x, float beat) {
-    float t = clamp((0.25 - x) / 1.25, 0.0, 1.5);
-    return beat * 0.16 * t * t;
+float botY(float s) {
+    float b = 0.225 * pow(clamp((s + 0.015) / 0.34, 0.0, 1.0), 0.55);
+    return -b * (1.0 - 0.76 * smoothstep(0.40, 1.0, s));
 }
 
-// A whale seen from the side, facing +x. The body runs from x = -1 (tail root)
-// to about x = 1.05 (snout); beat runs from -1 to 1 and moves the tail up and down;
-// fin swings the long pectoral fin. aa is the edge softness in whale units.
-float whale(vec2 q, float beat, float fin, float aa) {
-    float bend = bendAt(q.x, beat);
-    float y = q.y - bend;
-
-    // Half thickness along the body: a round head, thickest behind it, then a long
-    // taper to a thin tail stock. The belly hangs a bit lower than the back.
-    float h;
-    if (q.x > 0.25) {
-        float k = (q.x - 0.25) / 0.80;
-        h = 0.20 * pow(max(1.0 - k * k, 0.0), 0.45);
-    } else {
-        float k = (0.25 - q.x) / 1.25;
-        h = 0.032 + 0.168 * (1.0 - k * k);
-    }
-    h *= y > 0.0 ? 0.85 : 1.10;
-    float body = smoothstep(aa, -aa, max(abs(y) - h, max(-1.0 - q.x, q.x - 1.05)));
-
-    // Tail fluke: two swept-back lobes that tilt with the tail as it beats.
-    vec2 root = vec2(-1.0, bendAt(-1.0, beat));
-    float slope = -0.256 * beat;                                  // d(bend)/dx at the root
-    vec2 back = normalize(vec2(-1.0, -slope));
-    vec2 f = q - root;
-    float fx = dot(f, back);
-    float fy = abs(dot(f, vec2(-back.y, back.x)));
-    float fluke = smoothstep(aa, -aa, max(max(0.80 * fy - 0.03 - fx, fx - 0.08 - 1.0 * fy), fy - 0.26));
-
-    // Long pectoral fin under the front of the body, rowing slowly.
-    vec2 froot = vec2(0.40, -0.12 + bendAt(0.40, beat));
-    float ang = -2.05 + 0.25 * fin;
-    vec2 pf = segment(q, froot, froot + 0.50 * vec2(cos(ang), sin(ang)));
-    float pec = smoothstep(aa, -aa, pf.x - mix(0.055, 0.018, pf.y));
-
-    // Small hooked dorsal fin far back on the spine.
-    float b = bendAt(-0.40, beat);
-    vec2 df = segment(q, vec2(-0.32, 0.12 + b), vec2(-0.50, 0.20 + b));
-    float dorsal = smoothstep(aa, -aa, df.x - mix(0.04, 0.008, df.y));
-
-    float shape = max(max(body, fluke), max(pec, dorsal));
-
-    // Darker details cut into the light shape: eye, mouth line, throat grooves.
-    float eye = smoothstep(0.026, 0.014, length(q - vec2(0.74, -0.02)));
-    float mouth = smoothstep(0.022, 0.008, segment(q, vec2(1.02, -0.07), vec2(0.56, -0.11)).x);
-    float grooves = step(y, -0.10) * step(0.30, q.x) * smoothstep(0.5, 0.9, sin(y * 110.0));
-    float shade = smoothstep(-0.10, 0.18, y) * body;              // darker back, pale belly
-    return shape * (1.0 - 0.3 * shade) * (1.0 - 0.85 * eye - 0.6 * mouth - 0.3 * grooves);
+// The swimming wave: almost still at the head, growing toward the tail, and
+// travelling backwards along the body (the crest moves from head to fluke).
+float wave(float s, float ph) {
+    float a = 0.008 + 0.105 * pow(smoothstep(0.28, 1.0, s), 1.7);
+    return a * sin(ph - 2.4 * s);
 }
 
-// A spout: drops thrown up from the blowhole in a narrow fan, falling back
-// under gravity and drifting behind the whale as it swims on. q is in whale
-// units, age is seconds since the spout started.
-float spout(vec2 q, float age) {
-    vec2 hole = vec2(0.52, 0.17);
-    float light = 0.0;
-    for (int k = 0; k < DROPS; k++) {
-        float fk = float(k);
-        float a = age - fk * 0.04;                                // drops leave one after another
-        if (a < 0.0 || a > 2.2) continue;
-        float h1 = hash1(fk * 12.9898 + 1.0);
-        float h2 = hash1(fk * 78.233 + 2.0);
-        vec2 v = vec2((h1 - 0.5) * 0.8, 2.0 + 0.8 * h2);           // up, spreading into a V
-        vec2 pos = hole + v * a + vec2(-0.25 * a, -1.4 * a * a);  // gravity, and left behind
-        float r = mix(0.030, 0.055, h2) * (1.0 + 0.6 * a);         // drops spread into mist
-        float fade = 1.0 - a / 2.2;
-        light += smoothstep(r, r * 0.3, length(q - pos)) * fade * 0.8;
-    }
-    // A soft misty column shooting up first, then thinning out.
-    float rise = min(age * 2.5, 1.0) * 0.85;
-    vec2 pa = q - hole;
-    float hcol = clamp(pa.y / max(rise, 0.01), 0.0, 1.0);
-    float col = smoothstep(0.10, 0.0, length(pa - vec2(-0.08 * hcol, rise * hcol)) - 0.03 * hcol);
-    light += col * 0.5 * max(0.0, 1.0 - age / 1.6);
-    return min(light, 1.0);
+// Dancing caustic net from the wavy surface (world coordinates, so the light
+// pattern stays in the water while the whale slides under it).
+float caustic(vec2 p, float t) {
+    vec2 q = p * 22.0;
+    vec2 w = q + 0.8 * vec2(sin(q.y * 1.7 + t * 0.9), sin(q.x * 1.5 - t * 0.7));
+    w += 0.4 * vec2(sin(w.y * 2.9 - t * 1.1), sin(w.x * 2.6 + t));
+    float a = pow(1.0 - abs(sin(w.x + 0.4 * w.y)), 5.0);
+    float b = pow(1.0 - abs(sin(w.y - 0.5 * w.x)), 5.0);
+    return clamp(a + b, 0.0, 1.0);
 }
 
-vec3 blend(vec3 base, vec3 color, float a) {
-    float lum = dot(iBackgroundColor, vec3(0.299, 0.587, 0.114));
-    a = clamp(a, 0.0, 1.0);
-    return lum > 0.5 ? mix(base, color * 0.35, a * 0.8) : base + color * a;
+// Soft god rays slanting down from the surface, slowly drifting and breathing.
+float rays(vec2 p, float t) {
+    float u = p.x + 0.35 * p.y;
+    float r = 0.55 * pow(0.5 + 0.5 * sin(u * 6.3 + 0.5 * sin(t * 0.13)), 6.0)
+            + 0.40 * pow(0.5 + 0.5 * sin(u * 11.7 - t * 0.21 + 1.3), 10.0)
+            + 0.35 * pow(0.5 + 0.5 * sin(u * 3.9 + t * 0.07 + 4.0), 4.0);
+    return r * (0.75 + 0.25 * sin(t * 0.31 + u * 2.0));
+}
+
+// Signed distance (whale units, negative inside) to a long, curved pectoral fin,
+// plus the position along it (0 root .. 1 tip) in .y.
+vec2 pecFin(vec2 q, vec2 root, float ang, float curv) {
+    vec2 dir = vec2(cos(ang), sin(ang));
+    vec2 d = q - root;
+    float u = dot(d, dir);
+    float v = dot(d, vec2(-dir.y, dir.x)) - curv * u * u;               // curved, flexing fin
+    float t = u / 0.66;
+    if (t < -0.3 || t > 1.4) return vec2(1.0, 0.0);
+    float tc = clamp(t, 0.0, 1.0);
+    float w = mix(0.045, 0.075, smoothstep(0.0, 0.3, tc))
+            * sqrt(max(1.0 - pow(max(tc - 0.3, 0.0) / 0.7, 2.0), 0.0));   // rounded tip
+    float dd = v > 0.0 ? v - w : -v - 0.8 * w;
+    dd = max(dd, max(-u, u - 0.66));
+    return vec2(dd, tc);
+}
+
+// Whale centre and heading at a given clock time.
+void pose(float clock, float size, float aspect, out vec2 c, out float dir, out float tilt) {
+    float t = clamp(mod(clock, PERIOD) / CROSS, 0.0, 1.0);
+    dir = mod(floor(clock / PERIOD), 2.0) < 0.5 ? 1.0 : -1.0;            // alternate sides
+    float margin = 1.45 * size;                                           // fluke tip / halo off-screen
+    // Hurry through the off-screen ends and linger while in view (smooth, and the
+    // same speed where one crossing joins the next).
+    t += 0.08 * sin(2.0 * PI * t);
+    float x = mix(-margin, aspect + margin, t);
+    if (dir < 0.0) x = aspect - x;
+    c = vec2(x, DEPTH_Y + 0.035 * sin(clock * 0.21));
+    tilt = 0.05 * cos(clock * 0.21);                                     // nose follows the slow rise and fall
+}
+
+// "Over" for premultiplied colour.
+void over(inout vec3 C, inout float A, vec3 col, float a) {
+    C = C * (1.0 - a) + col * a;
+    A = A * (1.0 - a) + a;
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
@@ -116,38 +116,160 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec4 base = texture(iChannel0, uv);
 
     float aspect = iResolution.x / iResolution.y;
-    // Ghostty's fragCoord has y pointing DOWN (0 at the top). The scene below is
-    // easier to think about with y pointing up, so flip it once here.
+    // Ghostty's fragCoord has y pointing DOWN; flip once so the scene is y-up.
     vec2 p = vec2(uv.x * aspect, 1.0 - uv.y);
 
-    // Big things big: the whale spans most of the window width. The cap only stops a
-    // very wide window from making it taller than about half the window.
-    float size = min(WIDTH * aspect / 2.45, 0.95);               // half the body length
+    float lum = dot(iBackgroundColor, vec3(0.299, 0.587, 0.114));
+    bool dark = lum < 0.5;
+    // Keep the shell text (top-left) clear: the water light is weaker there.
+    float textMask = smoothstep(0.15, 0.70, length(vec2(uv.x * 1.2, uv.y * 1.6)));
 
-    // Shift the clock so the whale is already well inside the window at start.
-    float clock = iTime + 0.30 * CROSS;
-    float t = mod(clock, PERIOD) / CROSS;                        // 0..1 while crossing
-    float dir = mod(floor(clock / PERIOD), 2.0) < 0.5 ? 1.0 : -1.0;   // alternate sides
+    float size = min(WIDTH * aspect / 2.45, 0.60);                       // half the body length
+    float clock = iTime + 0.30 * CROSS;                                  // already in view at start
 
+    // Water: a faint blue depth haze toward the bottom and soft god rays.
     vec3 rgb = base.rgb;
-    if (t < 1.0) {
-        float margin = 1.45 * size;                              // fluke tip to snout
-        float x = mix(-margin, aspect + margin, t);
-        if (dir < 0.0) x = aspect - x;
-        float y = 0.40 + 0.04 * sin(clock * 0.25);
-        float tilt = 0.06 * cos(clock * 0.25);                   // nose follows the slow rise and fall
-
-        vec2 q = (p - vec2(x, y)) / size;
-        q.x *= dir;                                              // face the way it swims
-        q = mat2(cos(tilt), -sin(tilt), sin(tilt), cos(tilt)) * q;
-
-        float beat = sin(clock * 0.9);
-        float fin = sin(clock * 0.45 + 1.0);
-        float aa = 1.5 / (iResolution.y * size);
-        float a = whale(q, beat, fin, aa);
-        a = max(a, spout(q, mod(iTime - 1.5, SPOUT)) * 0.9);   // first spout 1.5 s in
-        rgb = blend(rgb, vec3(0.62, 0.82, 1.0), a * INTENSITY);
+    float ray = rays(p, iTime);
+    float deep = smoothstep(0.75, 0.0, p.y);
+    if (dark) {
+        rgb += vec3(0.00, 0.035, 0.06) * deep * textMask;
+        rgb += vec3(0.40, 0.65, 0.78) * ray * RAYS * textMask * (0.5 + 0.5 * deep);
+    } else {
+        rgb -= vec3(0.03, 0.015, 0.0) * deep * textMask;
     }
+
+    vec2 c; float dir, tilt;
+    pose(clock, size, aspect, c, dir, tilt);
+
+    vec3 C = vec3(0.0);   // premultiplied whale colour
+    float A = 0.0;        // whale coverage
+    vec3 G = vec3(0.0);   // additive light: rim glow, halo, glints
+
+    vec2 q = (p - c) / size;
+    q.x *= dir;                                                          // face the way it swims
+    q = mat2(cos(tilt), -sin(tilt), sin(tilt), cos(tilt)) * q;
+
+    vec3 hazeC = vec3(0.10, 0.25, 0.36);   // colour of the deep water the whale fades into
+    vec3 rimC  = vec3(0.50, 0.78, 0.92);   // luminous edge / scattered light
+
+    // Bounding box early-out: everything below only runs near the whale.
+    if (q.x > -1.85 && q.x < 1.30 && q.y > -0.95 && q.y < 0.60) {
+        float ph = clock * BEAT;
+        float finPh = clock * 0.38 + 1.0;
+        float soft = max(1.5 / (iResolution.y * size), 0.018);            // soft edge width
+        float ca = caustic(p, iTime * 0.7);
+
+        // Far pectoral fin, behind the body: dim and lost in the haze.
+        float sF = 0.30;
+        vec2 rootF = vec2(1.05 - 2.05 * sF, 0.4 * botY(sF) + wave(sF, ph));
+        vec2 fF = pecFin(q, rootF, -2.62 + 0.10 * sin(finPh + 0.8), -0.10 + 0.14 * sin(finPh + 0.8));
+        float aF = smoothstep(soft, -soft, fF.x);
+        if (aF > 0.0) over(C, A, mix(vec3(0.62, 0.78, 0.88), hazeC, 0.5), aF * 0.28);
+
+        // Body.
+        float s = sOf(q.x);
+        float sc = clamp(s, 0.0, 1.0);
+        float y = q.y - wave(sc, ph);
+        float top = topY(sc), bot = botY(sc);
+        float dB = max(max(bot - y, y - top), max(-s * 2.05, (s - 1.0) * 2.05));
+        float v = clamp((y - bot) / max(top - bot, 1e-3), 0.0, 1.0);    // 0 belly .. 1 back
+
+        // Fluke: broad lobes seen slightly from above, pitching with the tail.
+        vec2 root = vec2(-1.0, wave(1.0, ph));
+        float slope = -(wave(1.0, ph) - wave(0.98, ph)) / 0.02 / 2.05;
+        float th = 1.5 * atan(slope);
+        vec2 back = vec2(-cos(th), -sin(th));
+        vec2 f = q - root;
+        float cc = dot(f, back);
+        float fs = 0.62 + 0.06 * sin(ph - 2.4);
+        float zz = dot(f, vec2(back.y, -back.x)) / fs;
+        float az = abs(zz);
+        float k = az / 0.40;
+        float cle = 0.40 * pow(k, 1.7) - 0.03;
+        float cte = 0.20 + 0.22 * pow(k, 0.9) - 0.05 * exp(-az * az / 0.002);
+        float dF = max(max(cle - cc, cc - cte), az - 0.40);
+
+        // Body and fluke as one soft silhouette.
+        float dW = min(dB, dF);
+        float bodyA = smoothstep(soft, -soft * 1.4, dW);
+        float isFluke = step(dF, dB);
+        float vv = mix(v, 0.55 + 0.25 * (1.0 - k), isFluke);               // fluke reads as mid-lit
+        float ss = mix(s, 1.15, isFluke);                                   // and furthest into the haze
+
+        if (bodyA > 0.0) {
+            float n = vnoise(q * vec2(7.0, 11.0));
+            // Lit from above: a bright slate-teal back fading to a dim, hazy belly.
+            vec3 col = mix(vec3(0.09, 0.20, 0.30), vec3(0.46, 0.66, 0.78), pow(vv, 1.1));
+            // A faint pale throat (the humpback's white underside, seen through haze).
+            float throat = (1.0 - isFluke) * smoothstep(0.38, 0.12, v) * smoothstep(0.55, 0.15, s);
+            col = mix(col, vec3(0.45, 0.58, 0.66), throat * (0.35 + 0.2 * n));
+            // Ventral pleats: barely-there light lines along the throat.
+            float pl = pow(1.0 - abs(sin(v * 40.0)), 8.0) * throat;
+            col += vec3(0.25, 0.35, 0.40) * pl * 0.35;
+            // Moving caustics and god rays play across the sunlit back.
+            float lit = smoothstep(0.35, 1.0, vv);
+            col += vec3(0.50, 0.75, 0.85) * ca * lit * 0.30;
+            col += vec3(0.30, 0.48, 0.56) * ray * (0.25 + 0.5 * lit);
+            col *= 0.92 + 0.16 * n;                                         // gentle mottling
+            // Eye: just a soft shadow, no hard dot.
+            float ed = length(vec2(q.x - (1.05 - 2.05 * 0.30), y - (bot + 0.43 * (top - bot))));
+            col *= 1.0 - 0.45 * smoothstep(0.03, 0.008, ed) * (1.0 - isFluke);
+            // Depth: the rear half and the fluke dissolve into the blue haze.
+            float depth = smoothstep(0.35, 1.15, ss);
+            col = mix(col, hazeC, 0.10 + 0.45 * depth);
+            float a = OPACITY * (0.55 + 0.45 * vv) * (1.0 - 0.45 * depth);
+            over(C, A, col, bodyA * a);
+        }
+
+        // Luminous edge: a soft glow hugging the back (strongest on top, where the
+        // sun catches it) and a wide faint halo of scattered light all round.
+        float edge = exp(-abs(dW) / 0.022);
+        float topSide = smoothstep(0.3, 0.9, vv) * (1.0 - 0.5 * smoothstep(0.6, 1.15, ss));
+        G += rimC * edge * topSide * 0.30 * GLOW;
+        G += hazeC * 1.6 * exp(-max(dW, 0.0) / 0.10) * 0.10 * GLOW * (1.0 - 0.4 * smoothstep(0.5, 1.2, ss));
+
+        // Near pectoral fin: long, white, softly glowing, rowing gently.
+        float sN = 0.33;
+        vec2 rootN = vec2(1.05 - 2.05 * sN, 0.5 * botY(sN) + wave(sN, ph));
+        vec2 fN = pecFin(q, rootN, -2.45 + 0.10 * sin(finPh), -0.12 + 0.18 * sin(finPh));
+        float aN = smoothstep(soft, -soft * 2.0, fN.x);
+        if (aN > 0.0) {
+            vec3 fc = mix(vec3(0.55, 0.70, 0.80), vec3(0.88, 0.95, 1.0), smoothstep(0.0, 0.5, fN.y));
+            fc += vec3(0.4, 0.6, 0.65) * ca * 0.35;
+            over(C, A, fc, aN * 0.50);
+        }
+        G += vec3(0.65, 0.85, 0.98) * exp(-max(fN.x, 0.0) / 0.035) * 0.11 * GLOW * smoothstep(0.0, 0.3, fN.y);
+    }
+
+    // Bubbles: puffs leave the blowhole, stay in the water as the whale swims on,
+    // and rise wobbling — drawn as small glints of light, fading before the text area.
+    for (int i = 0; i < BUBBLES; i++) {
+        float fk = float(i);
+        float life = 6.0;
+        float age = mod(clock - fk * 0.6, life);
+        vec2 bc; float bdir, btilt;
+        pose(clock - age, size, aspect, bc, bdir, btilt);
+        vec2 hole = vec2(0.60, topY(0.22));
+        hole = mat2(cos(btilt), sin(btilt), -sin(btilt), cos(btilt)) * hole;
+        hole.x *= bdir;
+        vec2 h = vec2(hash1(fk * 12.99 + 1.0), hash1(fk * 78.23 + 2.0));
+        vec2 pos = bc + hole * size
+                 + vec2((h.x - 0.5) * 0.04 + 0.012 * sin(age * 2.2 + fk), 0.035 * age + 0.004 * age * age);
+        float r = 0.004 + 0.004 * h.y + 0.0008 * age;
+        float d = length(p - pos);
+        if (d > r * 4.0) continue;
+        float fade = smoothstep(0.0, 0.5, age) * (1.0 - smoothstep(life - 2.0, life, age))
+                   * (1.0 - smoothstep(0.36, 0.52, pos.y));
+        float tw = 0.65 + 0.35 * sin(iTime * 3.0 + fk * 2.1);           // gentle twinkle
+        float core = exp(-d * d / (r * r * 0.35));
+        float ring = exp(-pow((d - r) / (r * 0.25), 2.0));
+        float halo = exp(-d / (r * 1.2)) * 0.25;
+        G += vec3(0.75, 0.92, 1.0) * (core * 0.55 * tw + ring * 0.30 + halo) * fade;
+    }
+
+    float op = INTENSITY * mix(0.6, 1.0, textMask);                      // see-through over the text corner
+    if (!dark) G *= 0.5;                                                  // light themes: less added glow
+    rgb = rgb * (1.0 - A * op) + C * op + G * op;
 
     fragColor = vec4(rgb, base.a);
 }
