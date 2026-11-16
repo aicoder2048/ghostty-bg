@@ -330,33 +330,78 @@ fx_browse() {
     write_include "$(current_image)" "$(managed_opacity)" "$(hidden_image)"
     reload_ghostty
   }
+  # A card in the middle of the top of the screen: category tabs, the effects of
+  # this category in a 3-column grid, the one that is on, and the keys. Every
+  # piece is placed with cursor positioning, so wide Chinese text needs no width maths.
   fxb_draw() {
-    local k j sel line
-    printf '\033[H\033[J'
+    local cols W X Y cw rows H k j r c sel x line hint
+    printf '\033[0m\033[H\033[J'
     (( FXB_PANEL )) || return 0
-    # Line 1: the categories. Line 2: the effects in this one. Line 3: what is on.
-    line="  "
-    for (( k = 0; k < ${#FXB_TITLE[@]}; k++ )); do
-      if (( k == FXB_G )); then line+=$'\033[7m '"${FXB_TITLE[k]}"$' \033[0m '
-      else line+=" ${FXB_TITLE[k]}  "; fi
+    local card=$'\033[0;48;5;236;38;5;252m' dim=$'\033[0;48;5;236;38;5;244m'
+    local edge=$'\033[0;48;5;236;38;5;240m' hi=$'\033[0;1;48;5;73;38;5;234m'
+    local bold=$'\033[0;1;48;5;236;38;5;255m' acc=$'\033[0;48;5;236;38;5;80m'
+    # stty reads the real window size; tput inside $(...) sees a pipe and says 80.
+    cols="$(stty size </dev/tty 2>/dev/null | cut -d' ' -f2)"
+    [[ "$cols" =~ ^[0-9]+$ ]] && (( cols >= 20 )) || cols=80
+    W=88; (( W <= cols - 2 )) || W=$(( cols - 2 ))
+    (( W >= 40 )) || W=40
+    X=$(( (cols - W) / 2 + 1 )); Y=2
+    cw=$(( (W - 4) / 3 ))
+    rows=$(( (FXB_COUNT[FXB_G] + 2) / 3 ))
+    H=$(( rows + 8 ))
+    at() { printf '\033[%d;%dH' "$(( Y + $1 ))" "$(( X + $2 ))"; }
+
+    # The empty card: borders and background, one row at a time.
+    line="$(printf '%*s' $(( W - 2 )) '' | sed 's/ /─/g')"
+    at 0 0; printf '%s╭%s╮' "$edge" "$line"
+    for (( r = 1; r < H - 1; r++ )); do
+      at "$r" 0; printf '%s│%s%*s%s│' "$edge" "$card" $(( W - 2 )) '' "$edge"
     done
-    printf '%s\n' "$line"
-    line="  "
+    at $(( H - 3 )) 0; printf '%s├%s┤' "$edge" "$line"
+    at $(( H - 1 )) 0; printf '%s╰%s╯' "$edge" "$line"
+    at 0 3; printf '%s %s ' "$acc" "$(msg 'ghostty-bg effects' 'ghostty-bg 特效')"
+
+    # Row 1: category tabs.
+    at 1 2
+    for (( k = 0; k < ${#FXB_TITLE[@]}; k++ )); do
+      if (( k == FXB_G )); then printf '%s %s %s ' "$hi" "${FXB_TITLE[k]}" "$card"
+      else printf '%s %s  ' "$dim" "${FXB_TITLE[k]}"; fi
+    done
+
+    # Rows 3..: the effects in this category, numbered for the 1-9 keys.
     sel="$(fxb_index)"
     for (( k = 0; k < FXB_COUNT[FXB_G]; k++ )); do
       j=$(( FXB_FIRST[FXB_G] + k ))
-      if (( j == sel && ! FXB_OFF )); then line+=$'\033[7m'" $(( k + 1 )) ${FXB_N[j]} "$'\033[0m '
-      else line+=" $(( k + 1 )) ${FXB_N[j]}  "; fi
+      r=$(( 3 + k / 3 )); c=$(( k % 3 ))
+      at "$r" $(( 2 + c * cw ))
+      if (( k < 9 )); then x="$(( k + 1 ))"; else x=" "; fi
+      if (( j == sel && ! FXB_OFF )); then
+        printf '%s %s %s' "$hi" "$x" "${FXB_N[j]}"
+        [[ "$UI_LANG" == zh ]] && printf ' %s' "${FXB_L[j]}"
+        printf ' '
+      else
+        printf '%s %s %s%s' "$dim" "$x" "$card" "${FXB_N[j]}"
+        [[ "$UI_LANG" == zh ]] && printf ' %s%s' "$dim" "${FXB_L[j]}"
+      fi
     done
-    printf '%s\n' "$line"
+
+    # What is on now.
+    at $(( H - 4 )) 3
     if (( FXB_OFF )); then
-      printf '  \033[1m%s\033[0m\n' "$(msg '(no effect)' '（无特效）')"
+      printf '%s%s' "$bold" "$(msg 'No effect' '无特效')"
     else
-      printf '  \033[1m%s\033[0m  %s   \033[2m%s %d/%d\033[0m\n' "${FXB_N[sel]}" "${FXB_L[sel]}" \
-             "${FXB_TITLE[FXB_G]}" $(( FXB_POS + 1 )) "${FXB_COUNT[FXB_G]}"
+      printf '%s%s  ' "$bold" "${FXB_N[sel]}"
+      line="${FXB_L[sel]}"
+      (( ${#line} <= W - 30 )) || line="${line:0:$(( W - 33 ))}..."
+      printf '%s%s  %s%s %d/%d' "$card" "$line" "$dim" "${FXB_TITLE[FXB_G]}" \
+             $(( FXB_POS + 1 )) "${FXB_COUNT[FXB_G]}"
     fi
-    printf '  \033[2m%s\033[0m\n' "$(msg '← → next/previous · ↑ ↓ category · 1-9 pick · r random · 0 none · space hide this · Enter keep · Esc undo' \
-                                          '← → 换一个 · ↑ ↓ 换一类 · 1-9 直接选 · r 随机 · 0 关掉 · 空格 隐藏这几行 · 回车 保留 · Esc 恢复原来的')"
+
+    # The keys.
+    hint="$(msg '←→ effect  ↑↓ category  1-9 pick  r random  0 none  space hide  ⏎ keep  esc undo' \
+                '←→ 换一个  ↑↓ 换一类  1-9 选  r 随机  0 关掉  空格 隐藏  回车 保留  esc 取消')"
+    at $(( H - 2 )) 3; printf '%s%s' "$dim" "$hint"
+    printf '\033[0m'
   }
 
   printf '\033[?1049h\033[?25l'   # alternate screen, hide the cursor
