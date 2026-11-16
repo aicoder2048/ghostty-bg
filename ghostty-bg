@@ -1567,11 +1567,23 @@ profile_list() {
   done < <(list_profiles)
 }
 
+# The profile name in a line of profile_list: after the 2-character mark ("* " or
+# "  "), the first word. (Not the second word of the whole line: an unmarked line
+# has no "*", so that would be the image count.)
+profile_line_name() {
+  awk '{ print $1 }' <<< "${1:2}"
+}
+
 profile_pick() {
-  local choice prompt
+  local choice prompt name
   prompt="$(msg 'profile> ' 'profile> ')"
   choice="$(profile_list | fzf --prompt="$prompt" --no-sort --height=~50% --reverse)" || exit 0
-  profile_switch "$(awk '{ print $2 }' <<< "${choice:1}")"
+  name="$(profile_line_name "$choice")"
+  # The picker only offers existing profiles; never create one from a bad parse.
+  if [[ "$name" != "$DEFAULT_PROFILE" ]] && ! { valid_profile_name "$name" && [[ -d "$ROOT_LIB/$name" ]]; }; then
+    die "could not read the chosen profile: $choice" "没认出选中的 profile：$choice"
+  fi
+  profile_switch "$name"
 }
 
 # Switch to profile $1 (created if missing) and show its image: the one it was
