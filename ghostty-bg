@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="1.21.0"
+VERSION="1.22.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"

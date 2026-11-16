@@ -1,20 +1,36 @@
-// satellite — the International Space Station drifts slowly above Earth's night-side limb, sunlight glinting across its golden solar arrays.
+// satellite — a rocket upper stage delivers a satellite on the right: the stage separates and tumbles away, the solar wings swing out and unfold, the dish and boom deploy, and the panels catch the sun.
 // zh: 卫星
 // group: space
 // Part of ghostty-bg. It only draws on top and never moves or distorts the
 // text underneath.
 
-const float INTENSITY = 0.92;    // overall strength (0 = off)
-const float OPACITY   = 0.90;    // how much the station hides what is behind it
-const float ISS_SIZE  = 0.0037;  // one metre of station in window heights (truss is 110 m)
-const float SPIN      = 0.010;   // in-plane rotation speed, radians per second
-const float GLINT     = 1.00;    // strength of the sun glints on arrays and modules
-const float EARTH     = 0.90;    // brightness of the Earth's limb, day sliver and city lights
-const float STARS     = 0.60;    // starfield brightness
-const float PERSP     = 0.008;   // slight perspective, used only for reflections (moves glints)
+const float INTENSITY = 0.92;   // overall strength (0 = off)
+const float OPACITY   = 0.88;   // how much the spacecraft hides what is behind it
+const float SIZE      = 1.00;   // scale of the whole craft (1 = wings span ~0.5 window heights)
+const float CYCLE     = 14.0;   // seconds per deployment, arrival to departure
+const float EARTH     = 0.80;   // brightness of the thin Earth limb at the lower right (0 = off)
+const float STARS     = 0.30;   // faint background stars
 
-const vec3 SUNC = vec3(1.00, 0.97, 0.92);   // sunlight colour
-const vec3 AMB  = vec3(0.035, 0.05, 0.08);  // faint blue earthshine on the shadow side
+const float PI = 3.14159265;
+
+// Timeline inside one cycle (seconds).
+const float T_ARR   = 3.0;    // stack has drifted into place
+const float T_SEP   = 3.2;    // upper stage separates
+const float T_SWING = 4.2;    // solar wings swing out from the body
+const float T_UNF   = 5.2;    // first outer panel starts to unfold (then one every 0.55 s)
+const float T_DISH  = 6.6;    // dish flips up, then opens
+const float T_BOOM  = 7.0;    // boom extends
+const float T_TURN  = 8.4;    // turns towards the sun
+const float T_GLINT = 9.0;    // glint sweeps across the arrays
+const float T_TRIM  = 10.3;   // attitude-control puffs
+const float T_DEP   = 11.2;   // drifts away
+
+// Craft dimensions (window heights at SIZE 1).
+const vec2  BODY = vec2(0.042, 0.052);   // half size of the bus front face
+const float DEP  = 0.011;                // apparent depth of the box (top and right faces)
+const float PW   = 0.048;                // width of one solar panel
+const float PH   = 0.052;                // half height of a panel
+const float YOKE = 0.022;                // yoke length between bus and first panel
 
 // ---- Helpers ------------------------------------------------------------
 
@@ -22,12 +38,6 @@ float hash12(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
     p3 += dot(p3, p3.yzx + 33.33);
     return fract((p3.x + p3.y) * p3.z);
-}
-
-vec2 hash22(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.xx + p3.yz) * p3.zy);
 }
 
 float vnoise(vec2 p) {
@@ -47,11 +57,16 @@ float sdBox(vec2 q, vec2 b) {
     return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
 }
 
-// Area coverage of a shape with signed distance d (aa = one pixel).
+float segD(vec2 p, vec2 a, vec2 b) {
+    vec2 pa = p - a, ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+// Coverage of a shape with signed distance d (aa = one pixel).
 float cover(float d, float aa) { return clamp(0.5 - d / aa, 0.0, 1.0); }
 
-// Exact pixel coverage of a straight line of half-width w at distance d, so
-// hair-thin seams stay thin and crisp instead of shimmering.
+// Exact pixel coverage of a line of half-width w at distance d.
 float lineCov(float d, float w, float aa) {
     return max(min(d + 0.5 * aa, w) - max(d - 0.5 * aa, -w), 0.0) / aa;
 }
@@ -62,258 +77,294 @@ void over(inout vec4 acc, vec3 c, float k) {
     acc.a = k + acc.a * (1.0 - k);
 }
 
-// Half vector between sun and a (very slightly perspective) view ray. The
-// perspective is what lets a glint slide across a flat panel.
-vec3 halfVec(vec2 q, vec3 L) {
-    return normalize(L + normalize(vec3(-q * PERSP, 1.0)));
+float ease(float x) { x = clamp(x, 0.0, 1.0); return x * x * (3.0 - 2.0 * x); }
+float easeOut(float x) { x = clamp(x, 0.0, 1.0); return 1.0 - pow(1.0 - x, 3.0); }
+
+// ---- Choreography -----------------------------------------------------------
+
+// Where the satellite is, its in-plane angle, scale (it shrinks as it recedes) and fade.
+void satPose(float t, float aspect, out vec2 pos, out float ang, out float sc, out float fade) {
+    vec2 C0 = vec2(aspect - 0.34, 0.37);
+    float e = easeOut(t / T_ARR);
+    pos = mix(C0 + vec2(0.55, -0.10), C0, e) + vec2(-0.003, 0.004) * t;
+    ang = mix(0.45, 0.12, e);
+    ang = mix(ang, -0.18, ease((t - T_TURN) / 1.4));           // face the sun
+    ang += 0.07 * ease((t - T_TRIM) / 1.0);                    // trim after the puffs
+    float x = clamp((t - T_DEP) / (CYCLE - T_DEP), 0.0, 1.0);
+    float ed = x * x;
+    pos += vec2(0.40, 0.14) * ed;
+    ang += 0.30 * ed;
+    sc = SIZE * mix(1.0, 0.45, ed);
+    fade = 1.0 - smoothstep(0.70, 1.0, x);
 }
 
-vec3 shade(vec3 n, vec3 L, vec3 H, vec3 kd, vec3 ks, float e) {
-    float dif = max(dot(n, L), 0.0);
-    float spe = pow(max(dot(n, H), 0.0), e);
-    return kd * (AMB + SUNC * dif) + ks * SUNC * spe * GLINT;
+// ---- Solar wing -------------------------------------------------------------
+// Four panels per wing. Panel k turns from edge-on (folded) to face-on, so its
+// apparent width is PW * sin(angle); the rest of the folded stack is a thin
+// strip at the end. Neighbouring panels tilt opposite ways (an accordion), so
+// their brightness alternates while they open.
+float panelAngle(int k, float t) {
+    if (k == 0) return 0.5 * PI * ease((t - T_SWING) / 1.0);
+    return 0.5 * PI * ease((t - T_UNF - 0.55 * float(k - 1)) / 0.75);
 }
 
-// ---- The station ----------------------------------------------------------
-// Local frame in metres: x along the main truss, y along the pressurised
-// modules (forward is +y), z towards the viewer. Seen from below, near
-// orthographic.
+void wing(inout vec4 acc, vec2 q, float s, float t, vec3 Ll, float aa,
+          float tiltB, float glintX, float glintA) {
+    float edgeX = s > 0.0 ? BODY.x + DEP : BODY.x;
+    float th0 = panelAngle(0, t);
+    float root = edgeX + YOKE * sin(th0);
+    float u = s * q.x;
+    float ph = PH * cos(tiltB);
 
-// Eight solar array wings: two columns at each end of the truss, every column
-// one wing either side of it. Each wing is two blankets of cells on a mast.
-void solarWings(inout vec4 acc, vec2 q, vec3 L, vec2 sp, float aa) {
-    float ax = abs(q.x), ay = abs(q.y);
-    if (ax < 28.4 || ax > 54.6 || ay < 2.6 || ay > 37.4) return;
-    float sx = sign(q.x), sy = sign(q.y);
-    float c  = ax < 41.5 ? 0.0 : 1.0;
-    float cx = mix(34.7, 48.5, c);
-    float u  = ax - cx;          // across the wing
-    float v  = ay - 3.0;         // along the wing, from the truss outwards
-
-    // The arrays are steered so their sun reflection lands on the point sp
-    // (which wanders slowly); each column is aimed a little differently.
-    vec2 colOff = (hash22(vec2(sx, c) * 7.3) - 0.5) * 10.0;
-    vec3 n = halfVec(sp + colOff, L);
-
-    // Blankets of cells, either side of the mast.
-    float dB = sdBox(vec2(abs(u) - 3.15, v - 17.1), vec2(2.70, 16.2));
-    float kB = cover(dB, aa);
-    if (kB > 0.0) {
-        float bu = abs(u) - 0.45, bv = v - 0.9;
-        vec2 csz = vec2(5.40 / 4.0, 32.4 / 24.0);
-        vec2 g = vec2(bu, bv) / csz;
-        vec2 id = floor(g), f = fract(g);
-        float ex = min(f.x, 1.0 - f.x) * csz.x;
-        float ey = min(f.y, 1.0 - f.y) * csz.y;
-        // Every sixth row is a fold hinge: a wider gap.
-        float hinge = mod(floor(g.y + 0.5), 6.0) < 0.5 ? 0.16 : 0.06;
-        float gap = max(lineCov(ex, 0.06, aa), lineCov(ey, hinge, aa));
-
-        vec2 seed = id + vec2(sx * 13.0 + c * 5.0 + sign(u) * 2.0, sy * 31.0);
-        vec2 hj = hash22(seed);
-        // Each cell sits at a slightly different angle, so the glint breaks
-        // up into a sparkle of individual cells rather than a smooth smear.
-        vec3 nc = normalize(n + vec3((hj - 0.5) * 0.045, 0.0));
-        vec2 qc = vec2(sx * (cx + sign(u) * (0.45 + (id.x + 0.5) * csz.x)),
-                       sy * (3.9 + (id.y + 0.5) * csz.y));
-        vec3 Hc = halfVec(qc, L);
-        float dif = max(dot(n, L), 0.0);
-        float hd  = max(dot(nc, Hc), 0.0);
-        float spe = pow(hd, 1400.0) * 1.6 + pow(hd, 120.0) * 0.18;
-        vec3 kd = vec3(0.36, 0.21, 0.07) * (0.82 + 0.36 * hash12(seed + 0.7));
-        vec3 cell = kd * (AMB + SUNC * dif * 0.95)
-                  + vec3(1.0, 0.80, 0.46) * SUNC * spe * GLINT;
-        vec3 gapC = vec3(0.05, 0.045, 0.04) + vec3(0.30, 0.27, 0.22) * dif * 0.25;
-        over(acc, mix(cell, gapC, gap), kB);
+    // Yoke: two struts from the bus side converging on the wing root.
+    if (u > edgeX - 0.002 && u < root + 0.002 && abs(q.y) < 0.03) {
+        float d = min(segD(vec2(u, q.y), vec2(edgeX, 0.022), vec2(root, 0.0)),
+                      segD(vec2(u, q.y), vec2(edgeX, -0.022), vec2(root, 0.0)));
+        float dif = 0.35 + 0.65 * max(Ll.z, 0.0);
+        over(acc, vec3(0.70, 0.70, 0.68) * dif, lineCov(d, 0.0011, aa));
     }
 
-    // Mast down the middle, and the stowage boxes at root and tip.
-    float kM = cover(sdBox(vec2(u, v - 17.1), vec2(0.13, 16.6)), aa);
-    float dif = max(dot(n, L), 0.0);
-    over(acc, vec3(0.55, 0.55, 0.52) * (AMB + SUNC * dif), kM);
-    float dBox = min(sdBox(vec2(u, v - 0.45), vec2(5.95, 0.42)),
-                     sdBox(vec2(u, v - 33.75), vec2(5.95, 0.42)));
-    vec3 boxC = shade(vec3(0.0, 0.0, 1.0), L, halfVec(q, L),
-                      vec3(0.52, 0.52, 0.50), vec3(0.4), 60.0);
-    over(acc, boxC, cover(dBox, aa));
-}
+    u -= root;
+    if (u < -0.002 || u > 4.0 * PW + 0.01 || abs(q.y) > ph + 0.003) return;
 
-// White heat-rejection radiators: three wide ones beside the centre of the
-// truss on each side, and a smaller one inboard of each array pair.
-void radiators(inout vec4 acc, vec2 q, vec3 L, float aa) {
-    float ax = abs(q.x), sx = sign(q.x);
-    vec3 H = halfVec(q, L);
-    if (ax > 11.0 && ax < 22.2 && q.y < -2.0 && q.y > -26.6) {
-        float k  = clamp(floor((ax - 11.2) / 3.6), 0.0, 2.0);
-        float cr = 13.0 + k * 3.6;
-        float u  = ax - cr, v = -q.y - 2.6;
-        float d  = sdBox(vec2(u, v - 11.8), vec2(1.62, 11.8));
-        float kc = cover(d, aa);
-        if (kc > 0.0) {
-            // Panels hinge at slightly different angles, so their brightness steps.
-            vec3 n = normalize(vec3(sx * 0.18 * (k - 1.0), 0.10, 1.0));
-            float pv = fract(v / 2.95);
-            float seam = lineCov(min(pv, 1.0 - pv) * 2.95, 0.07, aa);
-            float tube = 0.02 * step(0.5, fract(u * 2.5));
-            vec3 kd = vec3(0.86, 0.87, 0.88) * (1.0 - tube);
-            vec3 c = shade(n, L, H, kd, vec3(0.7), 90.0);
-            over(acc, mix(c, c * 0.55, seam), kc);
+    float st = 0.0;
+    for (int k = 0; k < 4; k++) {
+        float th = panelAngle(k, t);
+        float w = max(PW * sin(th), 0.0032);
+        if (u < st + w + 0.001) {
+            float d = sdBox(vec2(u - st - 0.5 * w, q.y), vec2(0.5 * w, ph));
+            float kc = cover(d, aa);
+            if (kc <= 0.0) return;
+            float alt = (k == 1 || k == 3) ? -1.0 : 1.0;
+            vec3 n = vec3(s * alt * cos(th), 0.0, sin(th));
+            n = vec3(n.x, n.z * sin(tiltB), n.z * cos(tiltB));
+            float dif = max(dot(n, Ll), 0.0);
+            vec3 c;
+            if (w < 0.009) {
+                // Folded or nearly edge-on: we see the panel's light substrate edge.
+                c = vec3(0.62, 0.62, 0.64) * (0.30 + 0.70 * dif);
+            } else {
+                float uu = (u - st) / w;
+                vec2 g = vec2(uu * 3.0, (q.y + ph) / (2.0 * ph) * 7.0);
+                vec2 id = floor(g), f = fract(g);
+                float ex = min(f.x, 1.0 - f.x) * w / 3.0;
+                float ey = min(f.y, 1.0 - f.y) * 2.0 * ph / 7.0;
+                float grid = max(lineCov(ex, 0.0005, aa), lineCov(ey, 0.0005, aa));
+                float frame = clamp((0.0018 - (-d)) / aa + 0.5, 0.0, 1.0);
+                float hc = hash12(id + vec2(float(k) * 7.0 + s * 13.0, 3.0));
+                vec3 cell = vec3(0.05, 0.09, 0.26) * (0.85 + 0.30 * hc) * (0.30 + 1.05 * dif);
+                // A soft sheen of reflected sky, stronger when facing the sun.
+                cell += vec3(0.10, 0.16, 0.30) * pow(dif, 6.0) * 0.6;
+                // The glint lights whole cells, so it stays crisp-edged.
+                float xc = s * (root + st + (id.x + 0.5) * w / 3.0);
+                float yc = -ph + (id.y + 0.5) * 2.0 * ph / 7.0;
+                float gl = exp(-pow((xc * 0.9 + yc * 0.7 - glintX) / 0.030, 2.0))
+                         * glintA * (0.55 + 0.45 * hc);
+                cell = mix(cell, vec3(1.0, 0.95, 0.84), clamp(gl, 0.0, 0.92));
+                vec3 lineC = vec3(0.62, 0.64, 0.68) * (0.30 + 0.70 * dif);
+                c = mix(cell, lineC, max(grid * 0.75, frame));
+            }
+            over(acc, c, kc);
+            return;
         }
-    }
-    if (ax > 24.0 && ax < 27.6 && q.y > 2.0 && q.y < 16.0) {
-        float d = sdBox(vec2(ax - 25.8, q.y - 9.0), vec2(1.45, 6.6));
-        float pv = fract((q.y - 2.4) / 2.2);
-        float seam = lineCov(min(pv, 1.0 - pv) * 2.2, 0.06, aa);
-        vec3 n = normalize(vec3(-sx * 0.12, 0.0, 1.0));
-        vec3 c = shade(n, L, H, vec3(0.84, 0.85, 0.86), vec3(0.6), 90.0);
-        over(acc, mix(c, vec3(0.25), seam), cover(d, aa));
+        st += w + 0.0014;
     }
 }
 
-// The integrated truss: an open lattice of rails and diagonal struts, with a
-// solid centre segment and the two rotary joints that turn the arrays.
-void truss(inout vec4 acc, vec2 q, vec3 L, float aa) {
-    float ax = abs(q.x);
-    if (ax > 55.3 || abs(q.y) > 3.2) return;
-    vec3 H = halfVec(q, L);
-    float hh = ax < 9.0 ? 2.45 : 2.15;
-    float kO = cover(sdBox(q, vec2(55.0, hh)), aa);
-    if (kO > 0.0) {
-        if (ax < 9.0) {
-            // Solid centre segment with equipment panels.
-            vec2 pc = fract(vec2(q.x / 2.25, q.y / 1.6 + 0.5));
-            float pe = min(min(pc.x, 1.0 - pc.x) * 2.25, min(pc.y, 1.0 - pc.y) * 1.6);
-            float ny = clamp(q.y / hh, -1.0, 1.0) * 0.5;
-            vec3 n = normalize(vec3(0.0, ny, 1.0));
-            vec3 kd = vec3(0.74, 0.74, 0.72) * (0.9 + 0.15 * hash12(floor(vec2(q.x / 2.25, q.y / 1.6 + 0.5)) + 3.0));
-            vec3 c = shade(n, L, H, kd, vec3(0.5), 60.0);
-            over(acc, mix(c, c * 0.45, lineCov(pe, 0.06, aa)), kO);
-        } else {
-            // Equipment inside the open lattice: darker, partly see-through.
-            over(acc, vec3(0.20, 0.20, 0.21) * (AMB * 3.0 + SUNC * 0.45 * L.z), kO * 0.55);
-            float bay = 4.3;
-            float bx = mod(ax, bay);
-            float par = mod(floor(ax / bay), 2.0);
-            float y2 = par > 0.5 ? -q.y : q.y;
-            // Diagonal strut across the bay.
-            vec2 a = vec2(0.0, -hh + 0.3), b = vec2(bay, hh - 0.3);
-            vec2 pa = vec2(bx, y2) - a, ba = b - a;
-            float dd = length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
-            float kS = max(lineCov(dd, 0.14, aa), lineCov(min(bx, bay - bx), 0.16, aa));
-            vec3 cs = shade(vec3(0.0, 0.0, 1.0), L, H, vec3(0.70, 0.70, 0.68), vec3(0.4), 50.0);
-            over(acc, cs, kS * kO);
-            // Top and bottom rails: little round tubes.
-            float dr = abs(q.y) - (hh - 0.24);
-            float kR = cover(abs(dr) - 0.24, aa) * kO;
-            float ny = clamp(dr / 0.24, -1.0, 1.0);
-            vec3 nr = normalize(vec3(0.0, sign(q.y) * ny, sqrt(1.0 - ny * ny)));
-            over(acc, shade(nr, L, H, vec3(0.78, 0.78, 0.76), vec3(0.6), 80.0), kR);
-        }
-    }
-    // Rotary joints (big drums) where the outer truss turns.
-    float dJ = sdBox(vec2(ax - 28.0, q.y), vec2(0.75, 2.95)) - 0.1;
-    float kJ = cover(dJ, aa);
-    if (kJ > 0.0) {
-        float nx = clamp((ax - 28.0) / 0.85, -1.0, 1.0);
-        vec3 n = normalize(vec3(sign(q.x) * nx, 0.0, sqrt(1.0 - nx * nx)));
-        over(acc, shade(n, L, H, vec3(0.80, 0.80, 0.78), vec3(0.7), 90.0), kJ);
-    }
+// ---- Bus (gold-foil box) ------------------------------------------------------
+
+vec3 foil(vec2 q, float lit, float ang) {
+    float n1 = vnoise(q * 70.0 + 3.0);
+    float n2 = vnoise(q * 160.0 + 11.0);
+    vec3 c = vec3(0.78, 0.55, 0.18) * (0.62 + 0.45 * n1 + 0.15 * n2);
+    // Crinkle facets: different facets catch the sun as the craft turns.
+    float th = 0.66 + 0.10 * sin(ang * 9.0 + 1.0);
+    float facet = smoothstep(th, th + 0.02, 0.6 * n1 + 0.4 * n2);
+    c += vec3(1.0, 0.86, 0.55) * facet * 0.55;
+    // Thin crease lines.
+    float crease = 1.0 - smoothstep(0.0, 0.035, abs(n2 - 0.5));
+    c *= 1.0 - 0.25 * crease;
+    return c * lit;
 }
 
-// A cylindrical module from a to b (axis-aligned), radius r, with blanket
-// seams and the sun's highlight running along it as a crisp stripe.
-void module(inout vec4 acc, vec2 q, vec2 a, vec2 b, float r, vec3 kd, vec3 L, float aa) {
-    vec2 d = b - a;
-    float len = length(d);
-    d /= len;
-    vec2 w = q - a;
-    float s = dot(w, d);
-    float c = d.x * w.y - d.y * w.x;
-    float sm = s - 0.5 * len;
-    float k = cover(sdBox(vec2(sm, c), vec2(0.5 * len - 0.3, r - 0.3)) - 0.3, aa);
+void bus(inout vec4 acc, vec2 q, vec3 Ll, float aa, float ang) {
+    if (abs(q.x) > BODY.x + DEP + 0.004 || abs(q.y) > BODY.y + DEP + 0.004) return;
+    // Right face (sheared up and back), then the top face.
+    float sx = q.x - BODY.x;
+    if (sx > -0.001) {
+        float yy = q.y - sx * (DEP / DEP);
+        float d = max(sdBox(vec2(sx - 0.5 * DEP, yy), vec2(0.5 * DEP, BODY.y)), -sx);
+        float lit = 0.20 + 0.80 * max(Ll.x, 0.0);
+        over(acc, foil(q * 1.3 + 5.0, lit * 0.75, ang), cover(d, aa));
+    }
+    float ty = q.y - BODY.y;
+    if (ty > -0.001) {
+        float xx = q.x - ty;
+        float d = max(sdBox(vec2(xx, ty - 0.5 * DEP), vec2(BODY.x, 0.5 * DEP)), -ty);
+        float lit = 0.20 + 0.80 * max(Ll.y, 0.0);
+        over(acc, foil(q * 1.3 + 9.0, lit * 0.95, ang), cover(d, aa));
+    }
+    // Front face.
+    float d = sdBox(q, BODY);
+    float k = cover(d, aa);
     if (k <= 0.0) return;
-    float ac = clamp(c / r, -0.995, 0.995);
-    vec3 n = vec3(vec2(-d.y, d.x) * ac, sqrt(1.0 - ac * ac));
-    // The end cones turn away from the viewer.
-    float endF = smoothstep(0.5 * len - 0.7, 0.5 * len, abs(sm));
-    n = normalize(n + vec3(d * sign(sm) * endF * 1.2, 0.0));
-    // Blanket seams: rings and a few lengthwise lines; patches vary a little.
-    float ring = 1.35;
-    float rs = fract(s / ring);
-    float seam = max(lineCov(min(rs, 1.0 - rs) * ring, 0.05, aa),
-                     lineCov(abs(fract(ac * 1.5 + 0.5) - 0.5) * r / 1.5, 0.04, aa) * 0.6);
-    float patchv = hash12(vec2(floor(s / ring), floor(ac * 1.5 + 2.0)) + a * 1.7);
-    vec3 base = kd * (0.90 + 0.14 * patchv) * (1.0 - 0.35 * seam);
-    vec3 col = shade(n, L, halfVec(q, L), base, vec3(0.65), 70.0);
-    over(acc, col, k);
-}
-
-vec4 drawStation(vec2 q, vec3 L, vec2 sp, float aa) {
-    vec4 acc = vec4(0.0);
-    radiators(acc, q, L, aa);
-    solarWings(acc, q, L, sp, aa);
-    truss(acc, q, L, aa);
-    if (abs(q.x) > 21.0 || q.y > 15.0 || q.y < -45.5) return acc;
-
-    vec3 W = vec3(0.86, 0.86, 0.84);    // US / European / Japanese white blankets
-    vec3 R = vec3(0.80, 0.82, 0.76);    // Russian segment, a little greener
-    vec3 H = halfVec(q, L);
-
-    // Small dark-blue arrays on the service module.
-    float ax = abs(q.x);
-    float dZ = sdBox(vec2(ax - 8.7, q.y + 31.5), vec2(6.2, 1.45));
-    float kZ = cover(dZ, aa);
-    if (kZ > 0.0) {
-        vec3 n = normalize(vec3(0.0, 0.25, 1.0));
-        float f = fract((ax - 2.5) / 1.55);
-        float g = max(lineCov(min(f, 1.0 - f) * 1.55, 0.06, aa), lineCov(abs(q.y + 31.5), 0.05, aa));
-        vec3 c = shade(n, L, H, vec3(0.06, 0.08, 0.16), vec3(0.55, 0.65, 0.9), 300.0);
-        over(acc, mix(c, vec3(0.30, 0.30, 0.30) * (0.3 + L.z), g), kZ);
+    float lit = 0.25 + 0.85 * max(Ll.z, 0.0);
+    vec3 c = foil(q, lit, ang);
+    // White radiator panel on the lower part, with fine heat-pipe lines.
+    float dr = sdBox(q - vec2(-0.004, -0.026), vec2(0.030, 0.018));
+    if (dr < 0.0) {
+        float f = fract((q.x + 0.034) / 0.006);
+        float ln = lineCov(min(f, 1.0 - f) * 0.006, 0.0004, aa);
+        vec3 rc = vec3(0.86, 0.87, 0.88) * lit * (1.0 - 0.18 * ln);
+        c = mix(c, rc, cover(dr, aa));
     }
-    // Kibo's exposed platform with its payload boxes.
-    float dE = sdBox(q - vec2(-16.9, 8.0), vec2(2.6, 2.1));
-    float kE = cover(dE, aa);
-    if (kE > 0.0) {
-        vec2 bi = floor((q - vec2(-19.5, 5.9)) / vec2(1.3, 1.4));
-        float hb = hash12(bi + 5.0);
-        vec3 c = shade(vec3(0.0, 0.0, 1.0), L, H, mix(vec3(0.62, 0.62, 0.60), vec3(0.80, 0.70, 0.45), step(0.7, hb)) * (0.75 + 0.3 * hb), vec3(0.4), 60.0);
-        over(acc, c, kE);
+    // Star tracker: a small dark baffle with a bright rim.
+    float ds = length(q - vec2(-0.026, 0.032)) - 0.007;
+    c = mix(c, vec3(0.05, 0.05, 0.06), cover(ds, aa));
+    c = mix(c, vec3(0.80, 0.80, 0.78) * lit, lineCov(abs(ds), 0.0007, aa));
+    // Crisp edge highlight around the face.
+    c = mix(c, vec3(1.0, 0.86, 0.52) * lit, lineCov(abs(d), 0.0006, aa) * 0.7);
+    over(acc, c, k);
+}
+
+// ---- Dish antenna -------------------------------------------------------------
+// A mast hinged on top of the bus swings from lying flat to upright, then the
+// dish opens. The dish is seen from the side, tilted a little towards us.
+void dish(inout vec4 acc, vec2 q, float t, vec3 Ll, float aa) {
+    float flip = ease((t - T_DISH) / 0.9);
+    float open = mix(0.30, 1.0, ease((t - T_DISH - 0.7) / 0.8));
+    vec2 hinge = vec2(0.010, BODY.y + DEP);
+    float psi = mix(0.5 * PI + 0.08, 0.0, flip);
+    vec2 dm = vec2(-sin(psi), cos(psi));
+    vec2 tip = hinge + dm * 0.030;
+    if (length(q - hinge) > 0.085) return;
+    float lit = 0.30 + 0.70 * max(Ll.z, 0.0);
+
+    // Mast.
+    over(acc, vec3(0.75, 0.75, 0.73) * lit, lineCov(segD(q, hinge, tip), 0.0011, aa));
+
+    vec2 pr = vec2(dm.y, -dm.x);
+    vec2 r = q - tip;
+    float a = dot(r, pr), b = dot(r, dm);
+    float R = 0.034 * open, D = 0.013 * open;
+    // Back of the bowl (half ellipse under the rim).
+    float eo = length(vec2(a / R, (b - D) / D)) - 1.0;
+    float kb = cover(max(eo * D, b - D), aa);
+    if (kb > 0.0) {
+        float sh = 0.45 + 0.55 * clamp(0.5 + 0.5 * dot(normalize(vec2(a, -0.5 * R)), rot(Ll.xy, 0.0)), 0.0, 1.0);
+        over(acc, vec3(0.88, 0.88, 0.86) * sh * lit, kb);
     }
-
-    // Side modules first, so the main stack sits on top of their roots.
-    module(acc, q, vec2(-2.0, 8.0),  vec2(-14.3, 8.0), 2.2, W, L, aa);  // Kibo
-    module(acc, q, vec2(2.0, 8.0),   vec2(9.0, 8.0),   2.2, W, L, aa);  // Columbus
-    module(acc, q, vec2(-2.0, -7.2), vec2(-9.4, -7.2), 2.2, W, L, aa);  // Tranquility
-    module(acc, q, vec2(-9.2, -7.2), vec2(-10.9, -7.2), 1.45, vec3(0.70), L, aa);  // Cupola
-    module(acc, q, vec2(2.0, -7.2),  vec2(7.2, -7.2),  1.9, W, L, aa);  // Quest airlock
-    // Main stack, forward to aft.
-    module(acc, q, vec2(0.0, 12.0),  vec2(0.0, 14.4),  1.3, vec3(0.62), L, aa);  // docking adapter
-    module(acc, q, vec2(0.0, 4.4),   vec2(0.0, 12.2),  2.2, W, L, aa);  // Harmony
-    module(acc, q, vec2(0.0, -4.6),  vec2(0.0, 4.6),   2.15, W, L, aa); // Destiny
-    module(acc, q, vec2(0.0, -10.0), vec2(0.0, -4.4),  2.3, W, L, aa);  // Unity
-    module(acc, q, vec2(0.0, -12.2), vec2(0.0, -9.8),  1.4, vec3(0.62), L, aa);
-    module(acc, q, vec2(0.0, -24.6), vec2(0.0, -12.0), 2.05, R, L, aa); // Zarya
-    module(acc, q, vec2(0.0, -37.8), vec2(0.0, -24.4), 2.1, R, L, aa);  // Zvezda
-    module(acc, q, vec2(0.0, -44.8), vec2(0.0, -37.6), 1.35, vec3(0.58, 0.60, 0.52), L, aa); // Progress
-    return acc;
+    // Inside of the bowl, seen through the rim ellipse: shaded opposite to the back.
+    float ei = length(vec2(a / R, (b - D) / (0.28 * R))) - 1.0;
+    float ki = cover(ei * 0.28 * R, aa);
+    if (ki > 0.0) {
+        float g = clamp(0.5 - 0.5 * a / R * sign(Ll.x + 1e-3), 0.0, 1.0);
+        vec3 c = vec3(0.70, 0.71, 0.72) * (0.45 + 0.55 * g) * lit;
+        c = mix(c, vec3(0.95, 0.95, 0.93), lineCov(abs(ei) * 0.28 * R, 0.0006, aa));
+        over(acc, c, ki);
+    }
+    // Feed on a strut at the focus, once the dish is open.
+    float fo = smoothstep(0.75, 0.95, open);
+    if (fo > 0.0) {
+        vec2 feed = tip + dm * (D + 0.75 * R);
+        over(acc, vec3(0.80, 0.80, 0.78) * lit, lineCov(segD(q, tip + dm * D, feed), 0.0008, aa) * fo);
+        over(acc, vec3(0.82, 0.80, 0.74) * lit, cover(length(q - feed) - 0.0035, aa) * fo);
+    }
 }
 
-// ---- Sky -----------------------------------------------------------------
-
-// Crisp starfield: at most one point star per grid cell, about a pixel wide.
-float starField(vec2 p, float t, float px) {
-    float cs = 0.026;
-    vec2 g = p / cs;
-    vec2 id = floor(g);
-    float h = hash12(id + 17.0);
-    if (h > 0.34) return 0.0;
-    vec2 o = 0.2 + 0.6 * hash22(id + 3.1);
-    float d = length(fract(g) - o) * cs / px;      // distance in pixels
-    float b = hash12(id + 9.7);
-    float r = 0.55 + 0.6 * b * b;
-    float tw = 0.85 + 0.15 * sin(t * (0.7 + 2.0 * h) + h * 60.0);
-    return exp(-d * d / (r * r)) * (0.18 + 0.82 * b * b * b) * tw;
+// ---- Boom ---------------------------------------------------------------------
+// A lattice boom telescopes out of the bus floor once the stage is gone.
+void boom(inout vec4 acc, vec2 q, float t, vec3 Ll, float aa) {
+    float L = 0.10 * ease((t - T_BOOM) / 1.2);
+    if (L <= 0.0) return;
+    float y0 = -BODY.y;
+    float y = y0 - q.y;                        // distance down the boom
+    if (y < -0.002 || y > L + 0.012 || abs(q.x) > 0.012) return;
+    float lit = 0.30 + 0.70 * max(Ll.z, 0.0);
+    if (y < L) {
+        float hw = 0.0038;
+        float rails = lineCov(abs(abs(q.x) - hw), 0.0006, aa);
+        float bay = 0.009;
+        float f = fract(y / bay);
+        float zig = mod(floor(y / bay), 2.0) < 0.5 ? f : 1.0 - f;
+        float diag = lineCov(abs(q.x - mix(-hw, hw, zig)) * 0.7, 0.0005, aa) * step(abs(q.x), hw);
+        over(acc, vec3(0.78, 0.78, 0.76) * lit, max(rails, diag));
+    }
+    // Sensor at the tip.
+    float ds = sdBox(vec2(q.x, y - L - 0.005), vec2(0.007, 0.005));
+    vec3 c = mix(vec3(0.55, 0.56, 0.58), vec3(0.88, 0.88, 0.86), step(0.0, q.x * sign(Ll.x + 1e-3))) * lit;
+    over(acc, c, cover(ds, aa));
 }
+
+// ---- Upper stage ----------------------------------------------------------------
+// Local frame: origin at the separation ring, the stage hangs down along -y.
+void stage(inout vec4 acc, vec2 q, vec3 Ll, float aa) {
+    if (abs(q.x) > 0.06 || q.y > 0.003 || q.y < -0.262) return;
+    float y = -q.y;
+    // Payload adapter: a short dark cone.
+    if (y < 0.022) {
+        float hw = mix(0.026, 0.046, y / 0.022);
+        float d = max(abs(q.x) - hw, max(-y, y - 0.022));
+        float nx = clamp(q.x / hw, -1.0, 1.0);
+        float dif = max(dot(vec3(nx, 0.3, sqrt(1.0 - nx * nx)), Ll), 0.0);
+        vec3 c = vec3(0.30, 0.30, 0.32) * (0.25 + 0.9 * dif);
+        c = mix(c, vec3(0.75), lineCov(abs(y - 0.004), 0.0006, aa) * 0.6);
+        over(acc, c, cover(d, aa));
+        return;
+    }
+    // Propellant tank: white cylinder with ring frames and a dark band.
+    if (y < 0.170) {
+        float hw = 0.048;
+        float d = max(abs(q.x) - hw, max(0.022 - y, y - 0.170));
+        float nx = clamp(q.x / hw, -1.0, 1.0);
+        vec3 n = vec3(nx, 0.0, sqrt(1.0 - nx * nx));
+        float dif = max(dot(n, Ll), 0.0);
+        vec3 H = normalize(Ll + vec3(0.0, 0.0, 1.0));
+        float spe = pow(max(dot(n, H), 0.0), 40.0);
+        vec3 base = vec3(0.84, 0.83, 0.80);
+        if (y > 0.030 && y < 0.042) base = vec3(0.16, 0.16, 0.17);    // dark band
+        float ring = max(lineCov(abs(y - 0.095), 0.0006, aa), lineCov(abs(y - 0.150), 0.0006, aa));
+        float str = lineCov(abs(fract(asin(nx) * 2.5) - 0.5) * 0.02, 0.0004, aa) * 0.35;
+        vec3 c = base * (0.10 + 0.95 * dif) * (1.0 - 0.35 * max(ring, str)) + vec3(0.35) * spe;
+        over(acc, c, cover(d, aa));
+        return;
+    }
+    // Thrust structure, then the engine bell.
+    if (y < 0.185) {
+        float hw = mix(0.040, 0.016, (y - 0.170) / 0.015);
+        float d = max(abs(q.x) - hw, y - 0.185);
+        over(acc, vec3(0.22, 0.21, 0.20) * (0.35 + 0.65 * max(Ll.z, 0.0)), cover(d, aa));
+        return;
+    }
+    float s = (y - 0.185) / 0.070;
+    float hw = 0.012 + 0.024 * pow(clamp(s, 0.0, 1.0), 0.65);
+    float d = max(abs(q.x) - hw, y - 0.255);
+    float nx = clamp(q.x / hw, -1.0, 1.0);
+    float dif = max(dot(vec3(nx, -0.35, sqrt(1.0 - nx * nx)), Ll), 0.0);
+    vec3 c = vec3(0.30, 0.24, 0.18) * (0.20 + 1.0 * dif);
+    c += vec3(0.55, 0.45, 0.35) * pow(dif, 12.0) * 0.6;                 // metallic streak
+    c *= 1.0 - 0.25 * lineCov(abs(fract(s * 6.0) - 0.5) * 0.0117, 0.0004, aa) * step(s, 0.5);
+    c = mix(c, vec3(0.80, 0.74, 0.66) * (0.4 + 0.6 * dif), lineCov(abs(y - 0.2535), 0.0010, aa));
+    over(acc, c, cover(d, aa));
+}
+
+// ---- Thruster puffs -------------------------------------------------------------
+// A small crisp cloud of gas: pushed out fast, slowing, growing and fading.
+void puff(inout vec4 acc, vec2 q, vec2 o, vec2 dir, float age, float size, vec3 Ll, float aa) {
+    if (age <= 0.0 || age > 1.6) return;
+    float g = 1.0 - exp(-age * 3.0);
+    vec2 c = o + dir * size * 2.2 * g;
+    float r = size * (0.15 + 0.85 * g);
+    float d = min(length(q - c) - r, length(q - c - dir * r * 0.9) - r * 0.65);
+    float k = cover(d, aa);
+    if (k <= 0.0) return;
+    float al = 0.85 * exp(-age * 1.7) * smoothstep(0.0, 0.04, age);
+    vec2 nn = (q - c) / max(r, 1e-4);
+    float sh = 0.70 + 0.30 * clamp(dot(nn, normalize(Ll.xy + 1e-4)), -1.0, 1.0);
+    over(acc, vec3(0.86, 0.89, 0.94) * sh, k * al);
+}
+
+// ---- Scene ------------------------------------------------------------------------
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord.xy / iResolution.xy;
@@ -322,95 +373,106 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float aspect = iResolution.x / iResolution.y;
     // Ghostty's fragCoord has y pointing DOWN; flip once so the scene is y-up.
     vec2 p = vec2(uv.x * aspect, 1.0 - uv.y);
-    float t = iTime;
     float px = 1.0 / iResolution.y;
     vec3 col = base.rgb;
 
-    // Sun: to the right and towards the viewer, so the station's left side is shadowed.
-    vec3 Lw = normalize(vec3(0.62, 0.22, 0.72));
+    // Start a second into the cycle so the stack is already sliding in.
+    float tt = iTime + 1.0;
+    float t = mod(tt, CYCLE);
 
-    // ---- Station placement (computed first so it can hide stars behind it).
-    vec2 pos = vec2(aspect - 0.36 + 0.03 * sin(t * 0.037),
-                    0.64 + 0.025 * sin(t * 0.029 + 1.0));
-    float ang = 0.42 + t * SPIN;
-    vec2 rel = p - pos;
-    vec4 sat = vec4(0.0);
-    if (length(rel) < 70.0 * ISS_SIZE) {
-        vec2 q = rot(rel, -ang) / ISS_SIZE;
-        vec3 L = vec3(rot(Lw.xy, -ang), Lw.z);
-        // Point the arrays' reflection lands on, wandering slowly over the
-        // whole station so the glint sweeps from cell to cell.
-        vec2 sp = vec2(50.0 * cos(t * 0.071 + 0.35), 24.0 * sin(t * 0.113 + 0.75));
-        sat = drawStation(q, L, sp, px / ISS_SIZE);
+    // Sun from the upper right, a little towards the viewer.
+    vec3 Lw = normalize(vec3(0.45, 0.40, 0.80));
+
+    // ---- Faint stars, dimmer over the text corner.
+    vec2 cell = floor(p * 26.0);
+    float hs = hash12(cell);
+    if (hs > 0.88) {
+        vec2 sp = (cell + vec2(hash12(cell + 3.1), hash12(cell + 7.7)) * 0.8 + 0.1) / 26.0;
+        float tw = 0.75 + 0.25 * sin(iTime * (0.8 + 2.0 * hs) + hs * 40.0);
+        float textArea = 1.0 - 0.7 * (1.0 - smoothstep(0.35, 0.6, uv.x)) * (1.0 - smoothstep(0.4, 0.65, uv.y));
+        col += vec3(0.82, 0.87, 1.0) * (hs - 0.88) / 0.12 * tw * STARS * textArea * INTENSITY
+             * exp(-pow(length(p - sp) / (1.1 * px), 2.0));
     }
 
-    // ---- Earth: a huge sphere whose limb curves through the lower right.
-    vec2 C = vec2(aspect + 0.30, -2.00);
-    float R = 2.35;
-    vec2 dp = p - C;
-    float r = length(dp);
-    vec2 nrm = dp / r;
-    float h = r - R;                                  // height above the limb
-    vec3 Le = normalize(vec3(0.999, 0.04, -0.30));    // sun for the Earth: low, behind the limb
-    float dayLimb = dot(nrm, Le.xy);
-
-    if (h > 0.0) {
-        // Stars, dimmer over the text corner, hidden by the station.
-        float textFade = mix(0.35, 1.0, smoothstep(0.25, 0.95, uv.x + uv.y * 0.6));
-        vec3 sc = mix(vec3(1.0, 0.86, 0.72), vec3(0.78, 0.86, 1.0), hash12(floor(p / 0.026) + 2.0));
-        col += sc * starField(p, t, px) * STARS * textFade * (1.0 - sat.a) * INTENSITY;
-    } else {
-        float depth = -h;
-        float s = r / R;
-        float mu = sqrt(max(1.0 - s * s, 0.0));
-        vec3 N = vec3(nrm * s, mu);
-        float day = smoothstep(-0.015, 0.03, dot(N, Le));
-        // Day side: dark ocean with crisp-edged cloud patches, brightening
-        // towards the limb where we look through more air.
-        float along = atan(nrm.y, nrm.x) * R + t * 0.002;
-        vec2 cp = vec2(along * 16.0, sqrt(depth) * 30.0);
-        float cl = vnoise(cp) * 0.65 + vnoise(cp * 2.7 + 7.0) * 0.35;
-        float clouds = smoothstep(0.56, 0.60, cl);
-        vec3 dayC = mix(vec3(0.03, 0.09, 0.22), vec3(0.62, 0.68, 0.76), clouds * 0.8);
-        dayC = mix(dayC, vec3(0.30, 0.52, 0.85), exp(-depth / 0.010) * 0.6);
-        dayC *= 0.75 * clamp(dot(N, Le) * 3.0 + 0.4, 0.0, 1.0);
-        vec3 nightC = vec3(0.004, 0.007, 0.016);
-        // Thin orange band along the terminator.
-        float term = exp(-pow(dot(N, Le) / 0.025, 2.0)) * exp(-depth / 0.05);
-        vec3 surf = mix(nightC, dayC, day) + vec3(0.9, 0.38, 0.12) * term * 0.25;
-        // City lights: crisp warm specks in loose clusters on the night side.
-        vec2 cg = p / 0.011;
-        vec2 cid = floor(cg);
-        float cluster = smoothstep(0.62, 0.78, vnoise(cid * 0.11 + 4.0));
-        if (hash12(cid + 41.0) < 0.30 * cluster) {
-            vec2 o = 0.2 + 0.6 * hash22(cid + 8.0);
-            float dpx = length(fract(cg) - o) * 0.011 / px;
-            float b = hash12(cid + 2.3);
-            float rr = 0.5 + 0.45 * b;
-            surf += vec3(1.0, 0.72, 0.36) * exp(-dpx * dpx / (rr * rr)) * (0.35 + 0.65 * b)
-                  * (1.0 - day) * smoothstep(0.0, 0.025, depth);
+    // ---- Earth: a thin limb across the lower right corner.
+    if (EARTH > 0.0) {
+        vec2 C = vec2(aspect + 0.40, -2.02);
+        float R = 2.15;
+        float h = length(p - C) - R;
+        if (h < 0.0) {
+            float depth = -h;
+            float lit = smoothstep(-0.2, 0.6, (p.x - aspect * 0.55) / aspect);
+            vec3 surf = mix(vec3(0.005, 0.01, 0.025), vec3(0.03, 0.07, 0.16), lit * exp(-depth / 0.06));
+            col = mix(col, surf, clamp(depth / px, 0.0, 1.0) * 0.75 * EARTH * INTENSITY);
         }
-        float body = clamp(depth / px, 0.0, 1.0);
-        col = mix(col, surf * EARTH, body * 0.82 * INTENSITY);
+        if (h > -3.0 * px && h < 8.0 * px) {
+            float hp = h / px;
+            float lit = smoothstep(0.45, 0.95, p.x / aspect);
+            vec3 atm = mix(vec3(0.10, 0.28, 0.65), vec3(0.40, 0.70, 1.0), lit);
+            col += atm * (lineCov(abs(hp - 0.8), 0.9, 1.0) * 0.9
+                          + exp(-max(hp, 0.0) / 2.5) * step(0.0, hp) * 0.25) * EARTH * INTENSITY;
+        }
     }
 
-    // Atmosphere: a crisp, thin blue line on the limb (two pixels) and a faint
-    // tight layer just above it. Bright where sunlit, dim airglow on the night side.
-    if (h > -4.0 * px && h < 12.0 * px) {
-        float hp = h / px;
-        float line = lineCov(abs(hp - 1.0), 1.0, 1.0);
-        float layer = exp(-max(hp, 0.0) / 3.0) * step(0.0, hp);
-        float lit = smoothstep(-0.10, 0.12, dayLimb);
-        vec3 atm = mix(vec3(0.10, 0.30, 0.70), vec3(0.40, 0.72, 1.00), lit);
-        float bright = mix(0.45, 1.0, lit);
-        col += atm * (line * 0.85 + layer * 0.22) * bright * EARTH * INTENSITY;
-        col += vec3(1.0, 0.45, 0.15) * lineCov(abs(hp + 0.5), 0.8, 1.0)
-             * exp(-pow(dayLimb / 0.05, 2.0)) * 0.5 * EARTH * INTENSITY;
+    vec2 pos; float ang, sc, fade;
+    satPose(t, aspect, pos, ang, sc, fade);
+
+    // ---- Upper stage: rides along until separation, then backs off and tumbles.
+    {
+        vec2 sp; float sa, ss, sf;
+        float ts = max(t - T_SEP, 0.0);
+        satPose(min(t, T_SEP), aspect, sp, sa, ss, sf);
+        vec2 axis = rot(vec2(0.0, -1.0), sa);
+        vec2 spos = sp + axis * ss * BODY.y
+                  + axis * (0.022 * ts + 0.0015 * ts * ts) + vec2(0.006, 0.0) * ts;
+        float sang = sa + 0.30 * ts * ts / (1.0 + ts);
+        float sscale = ss / (1.0 + 0.05 * ts);
+        float sfade = 1.0 - smoothstep(5.5, 7.5, ts);
+        if (t >= T_SEP) sfade *= sf; else sfade = fade;
+        vec2 rel = p - spos;
+        if (sfade > 0.0 && dot(rel, rel) < pow(0.28 * sscale, 2.0)) {
+            vec4 acc = vec4(0.0);
+            vec3 Ll = vec3(rot(Lw.xy, -sang), Lw.z);
+            stage(acc, rot(rel, -sang) / sscale, Ll, px / sscale);
+            float k = OPACITY * INTENSITY * sfade;
+            col = col * (1.0 - acc.a * k) + acc.rgb * k;
+        }
     }
 
-    // Station on top of everything.
-    float k = OPACITY * INTENSITY;
-    col = col * (1.0 - sat.a * k) + sat.rgb * k;
+    // ---- Satellite.
+    vec2 rel = p - pos;
+    if (fade > 0.0 && dot(rel, rel) < pow(0.32 * sc, 2.0)) {
+        vec2 q = rot(rel, -ang) / sc;
+        float aa = px / sc;
+        vec3 Ll = vec3(rot(Lw.xy, -ang), Lw.z);
+        vec4 acc = vec4(0.0);
+
+        // Panels tilt about the wing axis to face the sun during the turn.
+        float tb = mix(-0.55, atan(Ll.y, Ll.z), ease((t - T_TURN) / 1.4));
+        float gx = mix(-0.40, 0.40, clamp((t - T_GLINT) / 1.1, 0.0, 1.0));
+        float ga = smoothstep(T_GLINT - 0.1, T_GLINT + 0.15, t) * (1.0 - smoothstep(T_GLINT + 0.9, T_GLINT + 1.2, t));
+
+        wing(acc, q, sign(q.x), t, Ll, aa, tb, gx, ga);
+        boom(acc, q, t, Ll, aa);
+        bus(acc, q, Ll, aa, ang);
+        dish(acc, q, t, Ll, aa);
+
+        // Separation puffs from the springs/thrusters around the interface ring.
+        float a0 = t - T_SEP;
+        puff(acc, q, vec2(-0.040, -0.056), normalize(vec2(-1.0, -0.20)), a0, 0.026, Ll, aa);
+        puff(acc, q, vec2( 0.040, -0.056), normalize(vec2( 1.0, -0.20)), a0 - 0.05, 0.026, Ll, aa);
+        puff(acc, q, vec2(-0.022, -0.060), normalize(vec2(-0.5, -1.0)), a0 - 0.10, 0.020, Ll, aa);
+        puff(acc, q, vec2( 0.022, -0.060), normalize(vec2( 0.5, -1.0)), a0 - 0.12, 0.020, Ll, aa);
+        // Attitude trim: one corner pair starts the turn, the opposite pair stops it.
+        float a1 = t - T_TRIM;
+        puff(acc, q, vec2(-BODY.x + 0.004, BODY.y + DEP), vec2(0.0, 1.0), a1, 0.018, Ll, aa);
+        puff(acc, q, vec2(BODY.x + DEP - 0.004, -BODY.y), vec2(0.0, -1.0), a1, 0.018, Ll, aa);
+        puff(acc, q, vec2(BODY.x + 0.004, BODY.y + DEP), vec2(0.0, 1.0), a1 - 0.7, 0.014, Ll, aa);
+        puff(acc, q, vec2(-BODY.x + 0.004, -BODY.y), vec2(0.0, -1.0), a1 - 0.7, 0.014, Ll, aa);
+
+        float k = OPACITY * INTENSITY * fade;
+        col = col * (1.0 - acc.a * k) + acc.rgb * k;
+    }
 
     fragColor = vec4(col, base.a);
 }

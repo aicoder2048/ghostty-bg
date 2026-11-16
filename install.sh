@@ -31,7 +31,7 @@ SAMPLES=(sunset-sea.jpg atoll-aerial.jpg savanna.jpg)
 # Renamed or replaced in earlier versions; removed on upgrade so nothing stale is left.
 # (Only these exact names: your own .glsl files in the fx folder are never touched.)
 OLD_FILES=(bgx)
-OLD_FX=(rain.glsl stars.glsl clouds.glsl fog.glsl moon.glsl caustics.glsl scanlines.glsl vhs.glsl frost.glsl crab.glsl tiger.glsl eagle.glsl sunbeams.glsl dew.glsl bees.glsl birds.glsl cat.glsl seaweed.glsl peacock.glsl rabbit.glsl confetti.glsl crane.glsl deer.glsl dolphins.glsl seahorse.glsl ufo.glsl warp.glsl neongrid.glsl radar.glsl portal.glsl runes.glsl wisps.glsl rainbow.glsl)
+OLD_FX=(rain.glsl stars.glsl clouds.glsl fog.glsl moon.glsl caustics.glsl scanlines.glsl vhs.glsl frost.glsl crab.glsl tiger.glsl eagle.glsl sunbeams.glsl dew.glsl bees.glsl birds.glsl cat.glsl seaweed.glsl peacock.glsl rabbit.glsl confetti.glsl crane.glsl deer.glsl dolphins.glsl seahorse.glsl ufo.glsl warp.glsl neongrid.glsl radar.glsl portal.glsl runes.glsl wisps.glsl rainbow.glsl eclipse.glsl crystalball.glsl sparkles.glsl)
 FX_DIR="${GHOSTTY_BG_SHARE:-$HOME/.local/share/ghostty-bg}/fx"
 BIN_DIR="${GHOSTTY_BG_BIN:-$HOME/.local/bin}"
 # ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd / bgh / bgm / bga / bgf / bgv / bgt are one-line shortcuts.
