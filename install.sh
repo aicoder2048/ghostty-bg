@@ -34,8 +34,8 @@ OLD_FILES=(bgx)
 OLD_FX=(rain.glsl stars.glsl clouds.glsl fog.glsl moon.glsl caustics.glsl scanlines.glsl vhs.glsl frost.glsl crab.glsl tiger.glsl eagle.glsl)
 FX_DIR="${GHOSTTY_BG_SHARE:-$HOME/.local/share/ghostty-bg}/fx"
 BIN_DIR="${GHOSTTY_BG_BIN:-$HOME/.local/bin}"
-# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd / bgh / bgm / bga / bgf / bgv are one-line shortcuts.
-FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw bgd bgh bgm bga bgf bgv)
+# ghostty-bg is the main command; bgn / bgp / bgr / bg+ / bg- / bgw / bgd / bgh / bgm / bga / bgf / bgv / bgt are one-line shortcuts.
+FILES=(ghostty-bg bgn bgp bgr bg+ bg- bgw bgd bgh bgm bga bgf bgv bgt)
 
 mkdir -p "$BIN_DIR"
 

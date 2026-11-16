@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# bgt — shortcut for `ghostty-bg theme`: colour themes (bgt alone browses them; bgt <name>, bgt reset).
+exec ghostty-bg theme "$@"

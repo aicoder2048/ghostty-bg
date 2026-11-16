@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="1.17.1"
+VERSION="1.18.0"
 INCLUDE_NAME="background.ghostty"
 INCLUDE_LINE="config-file = ?$INCLUDE_NAME"
 INCLUDE_RE="^[[:space:]]*config-file[[:space:]]*=[[:space:]]*\"?\??\"?$INCLUDE_NAME"
@@ -179,8 +179,10 @@ is_narrow() {
 write_include() {
   # The effect shader survives every rewrite (switching, opacity, hide...) unless
   # cmd_fx sets FX_NEXT: a path to use, or "" to turn the effect off.
-  local fx
+  # The theme line survives the same way; cmd_theme sets THEME_NEXT ("" = none).
+  local fx theme
   fx="${FX_NEXT-$(managed_fx)}"
+  theme="${THEME_NEXT-$(managed_theme)}"
   {
     echo '# Managed by ghostty-bg — do not edit by hand. Run `bgs help` for commands.'
     [[ -n "$1" ]] && printf 'background-image = "%s"\n' "$1"
@@ -189,6 +191,7 @@ write_include() {
     [[ -n "${3:-}" ]] && printf '# hidden-image = "%s"\n' "$3"
     # An effect whose file is gone (retired in an update) is dropped quietly.
     [[ -n "$fx" && -f "$fx" ]] && printf 'custom-shader = "%s"\n' "$fx"
+    [[ -n "$theme" ]] && printf 'theme = %s\n' "$theme"
     true
   } > "$BG_CONF"
 }
@@ -568,6 +571,255 @@ cmd_fx() {
       "特效：${want} ${label}（在当前聚焦的窗口里动；bgf off 关掉）"
 }
 
+# ---------- themes (colour schemes) ----------
+
+# Ghostty ships hundreds of colour themes. bgt writes a `theme = ...` line into
+# the managed file, which is loaded after the main config and so overrides its
+# theme. Only the theme of the current macOS appearance (light or dark) is
+# changed; a `light:A,dark:B` pair keeps its other half.
+
+ghostty_bin() {
+  if command -v ghostty >/dev/null 2>&1; then command -v ghostty
+  elif [[ -x /Applications/Ghostty.app/Contents/MacOS/ghostty ]]; then echo /Applications/Ghostty.app/Contents/MacOS/ghostty
+  fi
+}
+
+# "dark" or "light": the macOS appearance right now.
+appearance() {
+  if [[ "$(defaults read -g AppleInterfaceStyle 2>/dev/null || true)" == Dark ]]; then echo dark; else echo light; fi
+}
+
+# The theme line ghostty-bg wrote, or empty.
+managed_theme() {
+  [[ -f "$BG_CONF" ]] || return 0
+  sed -n 's/^theme = //p' "$BG_CONF" | head -1
+}
+
+# The theme in effect: ours if set, else what Ghostty reads from the main config.
+effective_theme() {
+  local t bin
+  t="$(managed_theme)"
+  if [[ -z "$t" ]]; then
+    bin="$(ghostty_bin)"
+    [[ -n "$bin" ]] && t="$("$bin" +show-config 2>/dev/null | sed -n 's/^theme = //p' | head -1 || true)"
+  fi
+  echo "$t"
+}
+
+# $1 theme value, $2 light|dark: the theme used for that appearance.
+theme_part() {
+  local v="$1" part
+  if [[ "$v" == *light:* || "$v" == *dark:* ]]; then
+    part="$(printf '%s\n' "$v" | tr ',' '\n' | sed -n "s/^ *$2: *//p" | head -1)"
+    echo "$part"
+  else
+    echo "$v"
+  fi
+}
+
+# $1 theme value, $2 light|dark, $3 new theme name: the value with that half replaced.
+theme_with() {
+  local v="$1" slot="$2" name="$3" light dark
+  if [[ "$v" == *light:* || "$v" == *dark:* ]]; then
+    light="$(theme_part "$v" light)"; dark="$(theme_part "$v" dark)"
+    if [[ "$slot" == light ]]; then light="$name"; else dark="$name"; fi
+    echo "light:${light:-$name},dark:${dark:-$name}"
+  else
+    echo "$name"
+  fi
+}
+
+# Theme names, one per line. $1: dark | light | all.
+list_themes() {
+  local bin
+  bin="$(ghostty_bin)"
+  [[ -n "$bin" ]] || die "cannot find the ghostty command." "找不到 ghostty 命令。"
+  "$bin" +list-themes --plain --color="$1" 2>/dev/null | sed 's/ ([a-z]*)$//'
+}
+
+# Switch the theme for the current appearance (no checks; used while browsing).
+# The base value comes from THEME_BASE when set (the value before browsing began).
+theme_apply() {
+  local base slot
+  base="${THEME_BASE-$(effective_theme)}"
+  slot="${THEME_SLOT:-$(appearance)}"
+  THEME_NEXT="$(theme_with "$base" "$slot" "$1")"
+  write_include "$(current_image)" "$(managed_opacity)" "$(hidden_image)"
+  reload_ghostty >/dev/null
+}
+
+# A small colour sample: the 16 terminal colours and some typical output.
+theme_sample() {
+  local i
+  printf '\n  '
+  for i in 0 1 2 3 4 5 6 7; do printf '\033[4%dm    \033[0m' "$i"; done
+  printf '\n  '
+  for i in 0 1 2 3 4 5 6 7; do printf '\033[10%dm    \033[0m' "$i"; done
+  printf '\n\n'
+  printf '  \033[35m❯\033[0m \033[1mgit status\033[0m\n'
+  printf '  On branch \033[36mmain\033[0m\n'
+  printf '  \033[32m  modified:   README.md\033[0m\n'
+  printf '  \033[31m  deleted:    old.txt\033[0m\n\n'
+  printf '  \033[35m❯\033[0m \033[1mls\033[0m\n'
+  printf '  \033[1;34mfx\033[0m  \033[1;34msamples\033[0m  \033[32mghostty-bg\033[0m  README.md\n\n'
+  printf '  \033[33mwarning:\033[0m \033[2mnothing to commit\033[0m\n'
+  printf '  \033[90m# comment\033[0m  \033[95mfn\033[0m \033[94mmain\033[0m() { \033[92m"hello"\033[0m }\n'
+}
+
+# Browse with fzf: type to search, the terminal recolours as the cursor moves.
+theme_browse_fzf() {
+  local list="$1" start="$2" self pick rc
+  self="$0"; [[ "$self" == */* ]] || self="$(command -v "$self")"
+  export THEME_BASE THEME_SLOT
+  pick="$(printf '%s\n' "$list" | fzf --height=70% --layout=reverse --border=rounded \
+      --prompt="$(msg 'theme> ' '主题> ')" \
+      --header="$(msg "Changing the $THEME_SLOT theme · type to search · Enter keeps · Esc undoes" \
+                      "改的是$( [[ "$THEME_SLOT" == dark ]] && echo 深色 || echo 浅色 )外观的主题 · 打字搜索 · 回车保留 · Esc 恢复")" \
+      --bind "load:pos($start)" --bind "change:first" \
+      --bind "focus:execute-silent('$self' _theme-apply {})" \
+      --preview "'$self' _theme-sample" --preview-window=right,50%,border-left)" && rc=0 || rc=$?
+  (( rc == 0 )) && [[ -n "$pick" ]] || return 1
+  echo "$pick"
+}
+
+# Browse without fzf: a list with the cursor in the middle and a colour sample.
+theme_browse_keys() {
+  local -a names=()
+  local n i sel="$2" key rest top rows=13 cols x
+  while IFS= read -r i; do names+=("$i"); done <<< "$1"
+  n=${#names[@]}
+  TB_PICK=""
+
+  draw() {
+    local k j
+    printf '\033[0m\033[H\033[J'
+    printf '\n  \033[1m%s\033[0m  \033[2m%d/%d\033[0m\n\n' \
+      "$(msg "Theme ($THEME_SLOT appearance)" "主题（$( [[ "$THEME_SLOT" == dark ]] && echo 深色 || echo 浅色 )外观）")" $(( sel + 1 )) "$n"
+    top=$(( sel - rows / 2 )); (( top >= 0 )) || top=0
+    (( top + rows <= n )) || top=$(( n - rows )); (( top >= 0 )) || top=0
+    for (( k = 0; k < rows && top + k < n; k++ )); do
+      j=$(( top + k ))
+      if (( j == sel )); then printf '  \033[7m %s \033[0m\n' "${names[j]}"
+      else printf '   %s\n' "${names[j]}"; fi
+    done
+    # The sample on the right of the list.
+    cols="$({ stty size </dev/tty | cut -d' ' -f2; } 2>/dev/null || true)"
+    [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
+    x=$(( cols > 100 ? 40 : 0 ))
+    if (( x > 0 )); then
+      theme_sample | { r=3; while IFS= read -r line; do printf '\033[%d;%dH%s' "$r" "$x" "$line"; r=$(( r + 1 )); done; }
+    fi
+    printf '\033[%d;1H\n  \033[2m%s\033[0m' $(( rows + 5 )) \
+      "$(msg '↑↓ move · ←→ jump 10 · r random · Enter keep · Esc undo' '↑↓ 换一个 · ←→ 跳 10 个 · r 随机 · 回车 保留 · Esc 恢复')"
+  }
+
+  printf '\033[?1049h\033[?25l'
+  theme_apply "${names[sel]}"; draw
+  while IFS= read -r -s -n 1 key </dev/tty; do
+    if [[ "$key" == $'\033' ]]; then
+      rest=""
+      IFS= read -r -s -n 2 -t 1 rest </dev/tty || true
+      case "$rest" in
+        '[A') key=up ;; '[B') key=down ;; '[C') key=right ;; '[D') key=left ;;
+        *)    break ;;
+      esac
+    fi
+    case "$key" in
+      '')       TB_PICK="${names[sel]}"; break ;;
+      q|Q)      break ;;
+      up|k)     sel=$(( (sel - 1 + n) % n )) ;;
+      down|j)   sel=$(( (sel + 1) % n )) ;;
+      left)     sel=$(( sel - 10 )); (( sel >= 0 )) || sel=0 ;;
+      right)    sel=$(( sel + 10 )); (( sel < n )) || sel=$(( n - 1 )) ;;
+      r|R)      sel=$(( RANDOM % n )) ;;
+      *)        continue ;;
+    esac
+    theme_apply "${names[sel]}"; draw
+  done
+  printf '\033[?25h\033[?1049l'
+  [[ -n "$TB_PICK" ]]
+}
+
+# bgt / bgs theme            browse the themes for the current appearance (fzf if installed)
+# bgt all                    browse every theme, light and dark
+# bgt <name>                 use that theme for the current appearance
+# bgt random                 a random one
+# bgt list                   list them (* = in use)
+# bgt reset                  back to the theme in your own Ghostty config
+cmd_theme() {
+  require_init
+  local want="${1:-}" slot list cur start pick rc=0
+  slot="$(appearance)"
+  THEME_SLOT="$slot"
+  THEME_BASE="$(effective_theme)"
+  cur="$(theme_part "$THEME_BASE" "$slot")"
+
+  case "$want" in
+    reset|off|default)
+      THEME_NEXT=""
+      write_include "$(current_image)" "$(managed_opacity)" "$(hidden_image)"
+      reload_ghostty
+      msg "Theme: back to the one in your Ghostty config." "主题：恢复成你 Ghostty 配置里的那个。"
+      return ;;
+    list)
+      list_themes "$slot" | while IFS= read -r t; do
+        if [[ "$t" == "$cur" ]]; then echo "* $t"; else echo "  $t"; fi
+      done
+      return ;;
+  esac
+
+  if [[ "$want" == all ]]; then list="$(list_themes all)"; else list="$(list_themes "$slot")"; fi
+  [[ -n "$list" ]] || die "Ghostty listed no themes." "Ghostty 没有列出任何主题。"
+
+  if [[ "$want" == random ]]; then
+    want="$(printf '%s\n' "$list" | awk -v n="$RANDOM" '{ a[NR] = $0 } END { print a[n % NR + 1] }')"
+  fi
+
+  if [[ -n "$want" && "$want" != all ]]; then
+    # A name: exact first, then ignoring case.
+    pick="$(list_themes all | awk -v w="$want" '$0 == w { print; exit }')"
+    [[ -n "$pick" ]] || pick="$(list_themes all | awk -v w="$want" 'tolower($0) == tolower(w) { print; exit }')"
+    [[ -n "$pick" ]] || die "no theme named \"$want\" — see: bgt list" "没有叫 \"$want\" 的主题——用 bgt list 看有哪些"
+    theme_apply "$pick"
+    msg "Theme ($slot): $pick" "主题（$( [[ "$slot" == dark ]] && echo 深色 || echo 浅色 )外观）：$pick"
+    return
+  fi
+
+  # Browsing needs a terminal.
+  [[ -t 0 && -t 1 ]] || { cmd_theme list; return; }
+  start="$(printf '%s\n' "$list" | awk -v c="$cur" '$0 == c { print NR; exit }')"
+  [[ -n "$start" ]] || start=1
+
+  # Keep an exact copy of the managed file: Esc, Ctrl+C or a closed tab put it back.
+  TB_SAVED="$(mktemp)"; TB_KEEP=0
+  cp "$BG_CONF" "$TB_SAVED"
+  leave_theme() {
+    trap - INT TERM HUP EXIT
+    (( TB_KEEP )) || cp "$TB_SAVED" "$BG_CONF"
+    rm -f "$TB_SAVED"
+    reload_ghostty
+    printf '\033[?25h'
+  }
+  trap 'leave_theme; exit 0' INT TERM HUP
+  trap 'leave_theme' EXIT
+
+  if command -v fzf >/dev/null 2>&1; then
+    pick="$(theme_browse_fzf "$list" "$start")" || rc=$?
+  else
+    theme_browse_keys "$list" $(( start - 1 )) || rc=$?
+    pick="$TB_PICK"
+  fi
+  if (( rc == 0 )) && [[ -n "$pick" ]]; then
+    theme_apply "$pick"; TB_KEEP=1
+  fi
+  leave_theme
+  if (( TB_KEEP )); then
+    msg "Theme ($slot): $pick" "主题（$( [[ "$slot" == dark ]] && echo 深色 || echo 浅色 )外观）：$pick"
+  else
+    msg "Theme unchanged." "主题没有改动。"
+  fi
+}
+
 set_image() {
   local img="$1" name
   [[ -f "$img" ]] || die "image not found: $img" "找不到图片：$img"
@@ -869,6 +1121,7 @@ cmd_view() {
   VIEW_START="$img"
   VIEW_FX="$(managed_fx)"
   VIEW_OPACITY="$(managed_opacity)"
+  VIEW_THEME="$(managed_theme)"
 
   # Keep an exact copy of the managed file and put it back when we leave,
   # however we leave (key press, Ctrl+C, closed tab).
@@ -880,7 +1133,7 @@ cmd_view() {
     if [[ "$VIEW_IMG" == "$VIEW_START" ]]; then
       cp "$VIEW_SAVED" "$BG_CONF"                 # nothing changed: exact restore
     else
-      FX_NEXT="$VIEW_FX"                          # keep the image you stopped on
+      FX_NEXT="$VIEW_FX"; THEME_NEXT="$VIEW_THEME"   # keep the image you stopped on
       write_include "$VIEW_IMG" "$VIEW_OPACITY"
     fi
     rm -f "$VIEW_SAVED"
@@ -900,6 +1153,7 @@ cmd_view() {
       echo 'background-image-opacity = 1'
       printf 'custom-shader = "%s"\n' "$motion"
       [[ -n "$VIEW_FX" ]] && printf 'custom-shader = "%s"\n' "$VIEW_FX"
+      [[ -n "$VIEW_THEME" ]] && printf 'theme = %s\n' "$VIEW_THEME"
       true
     } > "$BG_CONF"
     VIEW_IMG="$1"
@@ -1256,6 +1510,7 @@ menu_card() {
     gap
     cells 外观 bg+ 浓一点 bg- 淡一点 bgh '隐藏 / 显示'
     cells "" +bgf '特效 72 种：直接敲 bgf 用方向键挑 · bgf list 列出 · bgf off 关'
+    cells "" +bgt '配色主题：直接敲 bgt 搜索着挑 · bgt reset 恢复'
     gap
     cells 图库 'bgs add' 加图或文件夹 bgd 删掉当前这张 'bgs rm' 按名字删
     cells "" 'bgs list' 列出全部
@@ -1264,13 +1519,14 @@ menu_card() {
     rule '├' '┤'
     blank; col 2; printf '%s速记' "$head"; col 12; printf '%sbg = background，再加一个字母\033[0m\n' "$card"
     memo n=next p=previous r=random s=select h=hide d=delete
-    memo w=where m=menu a=auto f=effects v=view +=浓 -=淡
+    memo w=where m=menu a=auto f=effects v=view t=theme +=浓 -=淡
   else
     cells switch bgn next bgp previous bgr random
     cells "" bgs 'pick (fzf)' bga slideshow bgv 'viewing mode'
     gap
     cells look bg+ stronger bg- fainter bgh 'hide / show'
     cells "" +bgf 'effects, 72 of them: plain bgf to browse · bgf list · bgf off'
+    cells "" +bgt 'colour theme: plain bgt to search and pick · bgt reset'
     gap
     cells library 'bgs add' 'add images' bgd 'delete current' 'bgs rm' 'remove by name'
     cells "" 'bgs list' 'list them all'
@@ -1279,7 +1535,8 @@ menu_card() {
     rule '├' '┤'
     blank; col 2; printf '%smemo' "$head"; col 12; printf '%sbg = background, plus one letter\033[0m\n' "$card"
     memo n=next p=previous r=random s=select h=hide d=delete
-    memo w=where m=menu a=auto f=effects v=view +=stronger -=fainter
+    memo w=where m=menu a=auto f=effects v=view t=theme
+    memo +=stronger -=fainter
   fi
   rule '╰' '╯'
 }
@@ -1340,6 +1597,7 @@ cmd_menu() {
          bgv  欣赏模式：清屏只看图，画面慢慢动
   外观   bg+  浓一点      bg-  淡一点      bgh  隐藏 / 显示
          bgf  特效 8 类 × 9 种（bgf 用方向键挑，bgf list 列出，bgf off 关）
+         bgt  配色主题（bgt 搜索着挑，bgt reset 恢复）
   图库   bgs add <图或文件夹>   加图        bgd  删掉当前这张
          bgs rm <名字>          删图        bgs list  列出
   其他   bgw  文件在哪    bgm  这个菜单    bgs help  完整帮助
@@ -1347,7 +1605,7 @@ cmd_menu() {
   速记：bg = background，再加一个字母
         n next · p previous · r random · s select
         h hide · d delete · w where · m menu · a auto · f effects
-        v view · + 浓 · - 淡
+        v view · t theme · + 浓 · - 淡
 EOF
   else
     cat <<'EOF'
@@ -1356,6 +1614,7 @@ EOF
            bgv  viewing mode: just the picture, slowly moving
   look     bg+  stronger    bg-  fainter     bgh  hide / show
            bgf  effects, 8 sets of 9 (bgf to browse, bgf list, bgf off)
+           bgt  colour theme (bgt to search and pick, bgt reset)
   library  bgs add <image or folder>  add   bgd  delete current
            bgs rm <name>              remove      bgs list  list
   more     bgw  where       bgm  this menu   bgs help  full help
@@ -1363,7 +1622,7 @@ EOF
   memo: bg = background, plus one letter
         n next · p previous · r random · s select
         h hide · d delete · w where · m menu · a auto · f effects
-        v view · + stronger · - fainter
+        v view · t theme · + stronger · - fainter
 EOF
   fi
 }
@@ -1398,11 +1657,13 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgs off | on      隐藏 / 恢复背景图（bgh 在两者之间切换）
   bgs fx [名字]     动态特效 8 类：天气 自然 动物 海洋 节日 太空 极客 奇幻。不写名字就进入浏览：← → 换一个，↑ ↓ 换一类，回车保留，Esc 恢复
                     list 列出全部；写类别名只看那一类；next / prev / random 换；off 关掉
+  bgs theme [名字]  配色主题，只改当前外观（浅色 / 深色）用的那个。不写名字就进入浏览：装了 fzf 可以打字搜索，
+                    光标移到哪个终端就换成哪个，回车保留，Esc 恢复；all 浏览全部；list 列出；random 随机；reset 恢复成你自己配置里的
   bgs rm <名字>     把图库里的图移到废纸篓（不写名字就用 fzf 多选；原图不受影响）
   bgs opacity       查看背景图浓度；bgs opacity 0.3 设成 0.3；+ / - 每次加减 0.05
   bgs where         显示用到的配置文件和图库位置（= bgw）
 
-快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgh = 隐藏/显示，bgw = 文件在哪，bgd = 删掉当前这张，bgm = 命令菜单，bga = 自动轮播，bgf = 特效，bgv = 欣赏模式
+快捷命令：bgn = 下一张，bgp = 上一张，bgr = 随机一张，bg+ = 浓一点，bg- = 淡一点，bgh = 隐藏/显示，bgw = 文件在哪，bgd = 删掉当前这张，bgm = 命令菜单，bga = 自动轮播，bgf = 特效，bgv = 欣赏模式，bgt = 主题
 
 缩写怎么来的：bg = background（背景），后面一个字母是动作
   bgs  s = select    挑图          bgn  n = next      下一张
@@ -1410,7 +1671,7 @@ ghostty-bg（简写 bgs）—— 一条命令切换 Ghostty 终端背景图（ma
   bgh  h = hide      隐藏/显示     bgd  d = delete    删掉当前这张
   bgw  w = where     文件在哪      bgm  m = menu      命令菜单
   bga  a = auto      自动轮播          bgf  f = effects   动态特效
-  bgv  v = view      欣赏模式
+  bgv  v = view      欣赏模式          bgt  t = theme     配色主题
   bg+  + = more      浓一点        bg-  - = less      淡一点
 
 语言：GHOSTTY_BG_LANG=zh 或 en（默认跟随 LANG）
@@ -1433,11 +1694,14 @@ Usage (bgs and ghostty-bg are the same command):
   bgs off | on      hide / bring back the background image (bgh toggles)
   bgs fx [name]     animated effects in 8 categories: weather nature animals ocean festival space geek fantasy. No name: browse them (← → effect, ↑ ↓ category, Enter keeps, Esc undoes)
                     list shows them all; a category shows just that one; next / prev / random switch; off stops
+  bgs theme [name]  colour theme, only for the current appearance (light / dark). No name: browse them (with fzf you can
+                    type to search; the terminal recolours as you move; Enter keeps, Esc undoes); all browses every theme;
+                    list, random; reset goes back to the theme in your own config
   bgs rm <name>     move library images to the Trash (no name: pick with fzf; originals untouched)
   bgs opacity       show the image opacity; bgs opacity 0.3 sets it; + / - step by 0.05
   bgs where         show which files ghostty-bg uses (= bgw)
 
-Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgh = hide/show, bgw = where, bgd = delete the current image, bgm = command menu, bga = auto slideshow, bgf = effects, bgv = viewing mode
+Shortcuts: bgn = next, bgp = previous, bgr = random, bg+ = stronger, bg- = fainter, bgh = hide/show, bgw = where, bgd = delete the current image, bgm = command menu, bga = auto slideshow, bgf = effects, bgv = viewing mode, bgt = theme
 
 Where the names come from: bg = background, plus one letter for the action
   bgs  s = select    pick one      bgn  n = next      next image
@@ -1445,7 +1709,7 @@ Where the names come from: bg = background, plus one letter for the action
   bgh  h = hide      hide / show   bgd  d = delete    delete current
   bgw  w = where     file places   bgm  m = menu      command menu
   bga  a = auto      auto slideshow bgf  f = effects   animated effect
-  bgv  v = view      viewing mode
+  bgv  v = view      viewing mode   bgt  t = theme     colour theme
   bg+  + = more      stronger      bg-  - = less      fainter
 
 Language: GHOSTTY_BG_LANG=zh or en (default: follows LANG)
@@ -1479,6 +1743,9 @@ main() {
     toggle)            cmd_toggle ;;
     menu)              cmd_menu ;;
     fx|effect)         shift; cmd_fx "${1:-}" ;;
+    theme)             shift; cmd_theme "${1:-}" ;;
+    _theme-apply)      shift; theme_apply "$1" ;;      # used by the fzf browser
+    _theme-sample)     theme_sample ;;
     rm|remove|delete)  shift; cmd_rm "$@" ;;
     opacity)           shift; cmd_opacity "${1:-}" ;;
     where)             cmd_where ;;
